@@ -93,11 +93,16 @@ class LorentzLoss(nn.Module):
             # Reshape grads to [B, N, d], where d=4 (4D space-time)
             grads = einops.rearrange(grads, 'B (N d) -> B N d', d=4)
 
-            # Compute the Lorentz transformation of the scalar field 'x.L.grad', and sum over all particles
-            big_tensor = torch.einsum('B c, a c d, B N d -> N B a', input, self.lorentz_gens, grads).sum(dim=0) # shape [B, 6 (generators)]
+            # Contract grads with generators, shape [6 (generators), B, N, d]
+            gen_grads = torch.einsum('a c d, B N d->  a B N c ',self.lorentz_gens, grads)
+            # Reshape to [6, B, (N d)]
+            gen_grads = einops.rearrange(gen_grads, 'a B N d -> a B (N d)')
+
+            # Dot with input [6 ,B]
+            differential_trans = torch.einsum('a B N, B N -> a B', gen_grads, input)
             
             # Penilize any Lorentz violation
-            scalar_loss = (big_tensor ** 2).sum()
+            scalar_loss = (differential_trans ** 2).sum()
             
             return scalar_loss
         
