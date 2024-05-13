@@ -83,19 +83,19 @@ class LorentzLoss(nn.Module):
         if spin not in ['scalar', 'vector']:
             raise ValueError("Currently supporting only spin-0 ('scalar') and spin-1 ('vector') outputs")
 
-        # Compute model output
+        # Compute model output, shape [B]
         output = self.model(input)
 
         if spin == 'scalar':
             # Compute gradients with respect to input, shape [B, 4N], B is the batch size, N is the number of particles
             grads, = torch.autograd.grad(outputs=output, inputs=input, grad_outputs=torch.ones_like(output, device=self.device), create_graph=True)
             
-            # Reshape grads to [B, N, d], where d=4 (4D space-time)
+            # Reshape grads to [B, N, d=4] (4D space-time)
             grads = einops.rearrange(grads, 'B (N d) -> B N d', d=4)
 
-            # Contract grads with generators, shape [6 (generators), B, N, d]
+            # Contract grads with generators, shape [6 (generators), B, N, 4 (D=4)]
             gen_grads = torch.einsum('a c d, B N d->  a B N c ',self.lorentz_gens, grads)
-            # Reshape to [6, B, (N d)]
+            # Reshape to [6, B, (4 N)]
             gen_grads = einops.rearrange(gen_grads, 'a B N d -> a B (N d)')
 
             # Dot with input [6 ,B]
