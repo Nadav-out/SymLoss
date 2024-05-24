@@ -15,8 +15,9 @@ class FashionCNN(nn.Module):
         self.bn1 = nn.BatchNorm2d(32)
         self.bn2 = nn.BatchNorm2d(64)
 
-        self.fc1 = nn.Linear(64 * 7 * 7,128)
+        self.fc1 = nn.Linear(64 * 12 * 12,128)
         self.fc2 = nn.Linear(128,10)
+
 
     def forward(self, x):
         x = self.conv1(x)
@@ -34,10 +35,14 @@ class FashionCNN(nn.Module):
 
         x = self.fc1(x)
         x = F.relu(x)
+        x = F.dropout(x,p=0.3, training=self.training)
         x = self.fc2(x)
         x = F.relu(x)
+        x = F.dropout(x,p=0.3, training=self.training)
 
         return F.log_softmax(x,dim=-1)
+
+
 
 class simpleNN(nn.Module):
     def __init__(self):
