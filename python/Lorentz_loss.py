@@ -102,7 +102,7 @@ class LorentzLoss(nn.Module):
             differential_trans = torch.einsum('a B N, B N -> a B', gen_grads, input)
             
             # Penilize any Lorentz violation
-            scalar_loss = (differential_trans ** 2).sum()
+            scalar_loss = 4*(differential_trans ** 2).sum()/len(input.view(-1))
             
             return scalar_loss
         
