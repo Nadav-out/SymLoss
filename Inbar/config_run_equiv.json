@@ -1,0 +1,19 @@
+{
+    "input_size":4,
+    "output_size":1,
+    "hidden_size":20,
+    "n_hidden_layers":20,
+    "init":"rand",
+    "equiv":"True",
+    "rand" : "True",
+    "freeze": "False",
+    "activation": "ReLU",
+    "skip" : "False",
+    "N" : 10000,
+    "nepochs" : 10000,
+    "lam_vec" : [0.1,0.01,0.0],
+    "lr" : 1e-3,
+    "opt" : "Adam"
+       
+}
+    
