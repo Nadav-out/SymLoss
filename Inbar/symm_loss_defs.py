@@ -446,9 +446,10 @@ class analysis_trained(symm_net_train):
     def pred_plot(self,save = False, outdir = "./",filename = ""):
         inputs = self.train_data.to(devicef)
         plt.clf()
+        fig = {}
         for lam_val in self.models.keys():
             plt.clf()
-            plt.figure()
+            fig[lam_val] = plt.figure()
             plt.scatter(self.train_labels.cpu().squeeze(),self.models[lam_val](inputs).detach().cpu().squeeze(),label = rf"$\lambda$ = {lam_val}")
 
             plt.legend()
@@ -457,10 +458,13 @@ class analysis_trained(symm_net_train):
             
             if save==True or save=="True":
                 if filename =="":
-                    filename = f"plot_pred_lam_{lam_val}_{self.filename}"
-                plt.savefig(f"{outdir}/{filename}.pdf")
+                    file = f"plot_pred_lam_{lam_val}_{self.filename}"
+                else:
+                    file = filename
+                fig[lam_val].show()
+                fig[lam_val].savefig(f"{outdir}/{file}.pdf")
             #plt.show()
-            plt.close()
+                plt.close(fig[lam_val])
 
         
             

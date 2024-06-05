@@ -2,7 +2,7 @@
 #SBATCH -C gpu
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=32
-#SBATCH --gpus-per-node=4
+#SBATCH --gpus-per-node=1
 #SBATCH --time 30
 #SBATCH -J train-pm
 #SBATCH -o logs/%x-%j.out
