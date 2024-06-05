@@ -1,19 +1,19 @@
 {
-    "input_size"=4,
-    "output_size"=1,
-    "hidden_size"=10,
-    "n_hidden_layers"=3,
-    "init"="rand",
-    "equiv"="False",
-    "rand" = "True",
-    "freeze" = "False",
-    "activation" = "ReLU",
-    "skip" = "False",
-    "N" = 1000,
-    "nepochs" = 1000,
-    "lam_vec" = [0.1,0.01,0.0],
-    "lr" = 1e-3,
-    "opt" = "Adam"
-    
+    "input_size":4,
+    "output_size":1,
+    "hidden_size":10,
+    "n_hidden_layers":3,
+    "init":"rand",
+    "equiv":"False",
+    "rand" : "True",
+    "freeze": "False",
+    "activation": "ReLU",
+    "skip" : "False",
+    "N" : 1000,
+    "nepochs" : 1000,
+    "lam_vec" : [0.1,0.01,0.0],
+    "lr" : 1e-3,
+    "opt" : "Adam"
+       
 }
     
