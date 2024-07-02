@@ -3,7 +3,8 @@
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=32
 #SBATCH --gpus-per-node=1
-#SBATCH --time 30
+#SBATCH --time 02:00:00
+#SBATCH --account m3246
 #SBATCH -J train-pm
 #SBATCH -o logs/%x-%j.out
 
@@ -18,6 +19,7 @@ json=/global/homes/i/inbarsav/SymLoss/Inbar/config_run.json
 saveplots="True"
 savenet="True"
 # Run the training
-srun -l -u python3 $trainer --jsonfile $json --saveplots $saveplots --savenet $savenet --outdir $outdir --plotsoutdir $plotsoutdir
+#srun -l -u 
+python3 $trainer --jsonfile $json --saveplots $saveplots --savenet $savenet --outdir $outdir --plotsoutdir $plotsoutdir
 #--rank-gpu --ranks-per-node=${SLURM_NTASKS_PER_NODE} $@
 

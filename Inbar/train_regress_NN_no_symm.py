@@ -57,8 +57,8 @@ print(f"data seed: {seed_data}, train seed: {seed_train}")
 
 
 symm_net.prepare_dataset(seed = seed_data, N = config["N"], batch_size = config["batch_size"])
-symm_net.set_model(init = config["init"],equiv=config["equiv"],rand=config["rand"], hidden_size =config["hidden_size"], n_hidden_layers = config["n_hidden_layers"],activation = config["activation"])
-symm_net.run_training(train_loader = symm_net.train_loader,nepochs = config["nepochs"],lam_vec = config["lam_vec"],seed = seed_train, lr = config["lr"],symm_norm = config["symm_norm"])
+symm_net.set_model(init = config["init"],equiv=config["equiv"],rand=config["rand"], hidden_size =config["hidden_size"], n_hidden_layers = config["n_hidden_layers"])
+symm_net.run_training_no_symm(train_loader = symm_net.train_loader,nepochs = config["nepochs"],lam_vec = config["lam_vec"],seed = seed_train, lr = config["lr"])
 
 
 anet =  analysis_trained()

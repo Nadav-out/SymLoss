@@ -1,19 +1,20 @@
 {
     "input_size":4,
     "output_size":1,
-    "hidden_size":20,
-    "n_hidden_layers":20,
+    "hidden_size":100,
+    "n_hidden_layers":3,
     "init":"rand",
     "equiv":"True",
     "rand" : "True",
     "freeze": "False",
-    "activation": "ReLU",
+    "activation": "GeLU",
     "skip" : "False",
     "N" : 10000,
-    "nepochs" : 10000,
-    "lam_vec" : [0.1,0.01,0.0],
-    "lr" : 1e-3,
-    "opt" : "Adam"
+    "nepochs" : 300,
+    "lam_vec" : [1,0.1,0.0],
+    "lr" : 1e-4,
+    "opt" : "Adam",
+    "batch_size" :100
        
 }
     

@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import copy
 import pickle
 import os
+import time
 
 def SO3_gens():
     Lz = torch.tensor([[0,1,0],[-1,0,0],[0,0,0]],dtype = torch.float32)
@@ -103,6 +104,56 @@ class SymmLoss(nn.Module):
      
             
         return scalar_loss
+    
+    
+
+
+class SymmLoss_norm(nn.Module):
+
+    def __init__(self, gens_list,model,device = devicef):
+        super(SymmLoss_norm, self).__init__()
+        
+        self.model = model.to(device)
+        self.device = device
+        # Initialize generators (in future add different reps for inputs?)
+        self.generators = einops.rearrange(gens_list, 'n w h -> n w h')
+        self.generators = self.generators.to(device)
+        
+
+    
+    def forward(self, input, model_rep='scalar',norm = "none"):
+        
+        input = input.clone().detach().requires_grad_(True)
+        input = input.to(self.device)
+        # Compute model output, shape [B]
+        output = self.model(input)
+
+        # Compute gradients with respect to input, shape [B, d*N], B is the batch size, d is the input irrep dimension, N is the number of particles
+        grads, = torch.autograd.grad(outputs=output, inputs=input, grad_outputs=torch.ones_like(output, device=self.device), create_graph=True)
+        
+        grads_norm = torch.einsum('... N, ... N -> ...', grads, grads)
+        #print(grads_norm.mean())
+        
+        # Reshape grads to [B, N, d] 
+        grads = einops.rearrange(grads, '... (N d) -> ... N d',d = self.generators.shape[-1])
+
+        # Contract grads with generators, shape [n (generators), B, N, d]
+        gen_grads = torch.einsum('n h d, ... N h->  n ... N d ',self.generators, grads)
+        # Reshape to [n, B, (d N)]
+        gen_grads = einops.rearrange(gen_grads, 'n ... N d -> n ... (N d)')
+
+        # Dot with input [n ,B]
+        differential_trans = torch.einsum('n ... N, ... N -> n ...', gen_grads, input)
+        
+       
+        
+        # scalar_loss = (differential_trans ** 2).mean()
+        # print(f"symm loss = {scalar_loss}")
+        
+        scalar_loss_norm = (1/len(self.generators))*(torch.sum(differential_trans**2,dim = 0)/grads_norm).mean()
+     
+            
+        return scalar_loss_norm
 
 
 
@@ -150,6 +201,11 @@ class genNet(nn.Module):
             # hidden layers
             for _ in range(n_hidden_layers):
                 module_list.extend([nn.Linear(hidden_size, hidden_size), nn.Sigmoid()])
+        elif activation== "GeLU":
+            module_list = [nn.Linear(input_size, hidden_size), nn.GELU()]
+            # hidden layers
+            for _ in range(n_hidden_layers):
+                module_list.extend([nn.Linear(hidden_size, hidden_size), nn.GELU()])    
 
         else:
             #input layer
@@ -191,7 +247,6 @@ class genNet(nn.Module):
             y = self.equiv_layer(y)
             if self.skip =="True":
                 y = self.equiv_layer(y) + self.skip_layer(x)
-            
         else:
             y = x
 
@@ -263,8 +318,138 @@ class symm_net_train():
         self.hidden_size = hidden_size
         self.n_hidden_layers = n_hidden_layers
 
-    def run_training(self,train_loader,nepochs = 1000,lam_vec = [0.0],seed = 98235, lr = 1e-3, opt = "Adam"):    
+    def run_training(self,train_loader,nepochs = 1000,lam_vec = [0.0],seed = 98235, lr = 1e-3, opt = "Adam",symm_norm = "False"):    
         lam = lam_vec
+        # Train the model, store train and test loss, print the loss every epoch
+        train_loss = []
+        symm_loss_vec = []
+        tot_loss_vec = []
+        running_loss = 0.0
+        symm_loss = 0.0
+        train_loss_lam = {}
+        symm_loss_lam= {}
+        tot_loss_lam = {}
+        models = {}
+        self.lr = lr
+        self.opt = opt
+        train_loader_copy = copy.deepcopy(train_loader)
+
+        if train_loader =="self":
+
+            train_loader = self.train_loader
+        
+        self.train_seed = seed
+
+        for lam_val in lam:
+            train_loader_copy = copy.deepcopy(train_loader)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            #self.prepare_dataset()
+            modelLorentz_symm = genNet(input_size = self.input_size, init = self.init ,equiv=self.equiv,rand=self.rand,freeze = self.freeze,activation = self.activation, skip = self.skip, n_hidden_layers = self.n_hidden_layers, hidden_size=self.hidden_size)
+
+            model = modelLorentz_symm.to(devicef)
+        
+            # Define the loss function and optimizer
+            if self.opt == "SGD":
+                optimizer = optim.SGD(model.parameters(), lr=lr, momentum = 0.9)
+
+            elif self.opt =="GD":
+                optimizer = optim.GD(model.parameters(), lr=lr)
+            
+            else:
+                optimizer = optim.Adam(model.parameters(), lr=lr)
+
+            #losses
+            criterion = nn.MSELoss()
+            
+            if symm_norm == "True":
+                
+                criterion_Lorentz = SymmLoss_norm(gens_list=self.gens_list, model = model)
+                
+            else:
+                criterion_Lorentz = SymmLoss(gens_list=self.gens_list, model = model)
+            
+            
+            ##############
+
+            train_loss = []
+            symm_loss_vec = []
+            tot_loss_vec = []
+            running_loss = 0.0
+            symm_loss = 0.0
+            start_MSE = 0.0
+            end_MSE = 0.0
+            start_symm = 0.0
+            end_symm = 0.0
+            deltat_MSE = 0.0
+            deltat_symm = 0.0
+            
+            
+            for epoch in range(nepochs):
+                model.train()
+                running_loss = 0.0
+                symm_loss = 0.0
+                for i, data in enumerate(train_loader_copy):
+                    inputs, labels = data
+                    labels = torch.unsqueeze(labels.to(devicef),1)
+                    inputs = inputs.to(devicef)
+                    optimizer.zero_grad()
+                    outputs = model(inputs)
+                    start_MSE = time.time()
+                    loss = criterion(outputs, labels)
+                   
+                    #loss_tot = loss+lam_val*loss_symm
+                    #loss_tot.backward()
+                    loss.backward()
+                    #debugging
+                    
+                    # if (epoch % 100 == 0) and (i==len(train_loader)-1):
+                    #     print("gradients MSE:")
+                    #     for param in model.parameters():
+                    #         print(param.grad)
+                    #     # param.grad.zero_()
+                    # # optimizer.zero_grad()
+                    end_MSE = time.time()
+                    deltat_MSE += end_MSE - start_MSE
+                    start_symm = time.time()
+                    loss_symm = criterion_Lorentz(input = inputs)
+                    loss_symmtot = lam_val*loss_symm
+                    loss_symmtot.backward()
+                    end_symm = time.time()
+                    deltat_symm += end_symm - start_symm
+                    # if (epoch % 100 == 0 and (i==len(train_loader)-1)):
+                    #     print(f"gradients MSE+{lam_val}*SYMM:")
+                    #     for param in model.parameters():
+                    #         print(param.grad)
+                    # # print(f"gradients MSE+{lam_val}*SYMM:")
+                    # # for param in model.parameters():
+                    # #     print(param.grad)
+                    ####
+                    optimizer.step()
+                    running_loss += loss.item()
+                    symm_loss += loss_symm.item()
+                train_loss.append(running_loss / (1.0*len(train_loader_copy)))
+                symm_loss_vec.append(symm_loss / (1.0*len(train_loader_copy)))
+                tot_loss_vec.append((lam_val*symm_loss+running_loss) / (1.0*len(train_loader_copy)))
+                if epoch % 100 == 0:
+                    print(f"time for 1 epoch 1 batch MSE: {(deltat_MSE)/((epoch+1)*len(train_loader_copy))}, symm:{(deltat_symm)/((epoch+1)*len(train_loader_copy))}")
+                    print(f"lambda = {lam_val} Epoch {epoch+1}, MSE loss: {train_loss[-1]:}, Lorentz loss: {symm_loss_vec[-1]:}")
+                    
+            
+            self.train_loss_lam[lam_val] = train_loss
+            self.symm_loss_lam[lam_val] = symm_loss_vec
+            self.tot_loss_lam[lam_val] = tot_loss_vec
+            
+            model_clone = copy.deepcopy(model)
+            self.models[lam_val] = model_clone#model.load_state_dict(model.state_dict())
+            if self.equiv =="True": 
+                print(f"bi-linear tensor layer:{model.bi_tensor}")
+                if self.skip =="True":
+                    print(f"skip layer:{model.skip_layer}")
+                    
+                    
+    def run_training_no_symm(self,train_loader,nepochs = 1000,lam_vec = [0.0],seed = 98235, lr = 1e-3, opt = "Adam",symm_norm = "False"):    
+        lam = [0.0]
         # Train the model, store train and test loss, print the loss every epoch
         train_loss = []
         symm_loss_vec = []
@@ -290,7 +475,8 @@ class symm_net_train():
             torch.manual_seed(seed)
             #self.prepare_dataset()
             modelLorentz_symm = genNet(input_size = self.input_size, init = self.init ,equiv=self.equiv,rand=self.rand,freeze = self.freeze,activation = self.activation, skip = self.skip, n_hidden_layers = self.n_hidden_layers, hidden_size=self.hidden_size)
-
+            
+            
             model = modelLorentz_symm.to(devicef)
         
             # Define the loss function and optimizer
@@ -305,7 +491,7 @@ class symm_net_train():
 
 
             criterion = nn.MSELoss()
-            criterion_Lorentz = SymmLoss(gens_list=self.gens_list, model = model)
+            #criterion_Lorentz = SymmLoss(gens_list=self.gens_list, model = model)
 
             train_loss = []
             symm_loss_vec = []
@@ -324,22 +510,21 @@ class symm_net_train():
                     optimizer.zero_grad()
                     outputs = model(inputs)
                     loss = criterion(outputs, labels)
-                    loss_symm = criterion_Lorentz(input = inputs)
-                    loss_tot = loss+lam_val*loss_symm
+                    
+                    loss_tot = loss
                     loss_tot.backward()
                     optimizer.step()
                     running_loss += loss.item()
-                    symm_loss += loss_symm.item()
+                    
                 train_loss.append(running_loss / len(train_loader))
-                symm_loss_vec.append(symm_loss / len(train_loader))
-                tot_loss_vec.append((lam_val*symm_loss+running_loss) / len(train_loader))
+                
+                tot_loss_vec.append((running_loss) / len(train_loader))
                 if epoch % 100 == 0:
-                    print(f"lambda = {lam_val} Epoch {epoch+1}, MSE loss: {train_loss[-1]:}, Lorentz loss: {symm_loss_vec[-1]:}")
+                    print(f"lambda = {lam_val} Epoch {epoch+1}, MSE loss: {train_loss[-1]:}")
                     
             
             self.train_loss_lam[lam_val] = train_loss
-            self.symm_loss_lam[lam_val] = symm_loss_vec
-            self.tot_loss_lam[lam_val] = tot_loss_vec
+            
             
             model_clone = copy.deepcopy(model)
             self.models[lam_val] = model_clone#model.load_state_dict(model.state_dict())
