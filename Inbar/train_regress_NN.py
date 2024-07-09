@@ -24,6 +24,8 @@ parser.add_argument("-o", "--outdir", help="output directory", default = "./stor
 parser.add_argument("--plotsoutdir", help="plots directory", default = "./plots",dest="plotsoutdir")
 parser.add_argument("-s", "--savenet", help="save net in pkl?", default = "y",dest="savenet")
 parser.add_argument("-p", "--saveplots", help="save plots?", default = "n",dest="saveplots")
+parser.add_argument("--seeddata",help = "set seed for data generation", default = "", dest = "seeddata")
+parser.add_argument("--seedtrain",help = "set seed for trainning", default = "", dest = "seedtrain")
 
 args = parser.parse_args()
 jsonfile = args.jsonfile
@@ -32,6 +34,8 @@ savenet = args.savenet
 saveplots = args.saveplots
 outdir = args.outdir
 plotsoutdir = args.plotsoutdir
+seed_data = args.seeddata
+seed_train = args.seedtrain
 
 #get argumnets from json file
 with open(jsonfile, 'r') as js:
@@ -46,8 +50,15 @@ if defaultjsonfile!="n":
         
 
 symm_net = symm_net_train()
-seed_data = int(torch.round(torch.rand(1)*10000))
-seed_train = int(torch.round(torch.rand(1)*10000))
+
+if args.seeddata.isnumeric():
+    seed_data = int(seed_data)
+else:
+    seed_data = int(torch.round(torch.rand(1)*10000))
+if args.seedtrain.isnumeric():
+    seed_train = int(seed_train)
+else:
+    seed_train = int(torch.round(torch.rand(1)*10000))
 print(f"data seed: {seed_data}, train seed: {seed_train}")
 
 
@@ -57,7 +68,7 @@ print(f"data seed: {seed_data}, train seed: {seed_train}")
 
 
 symm_net.prepare_dataset(seed = seed_data, N = config["N"], batch_size = config["batch_size"])
-symm_net.set_model(init = config["init"],equiv=config["equiv"],rand=config["rand"], hidden_size =config["hidden_size"], n_hidden_layers = config["n_hidden_layers"],activation = config["activation"])
+symm_net.set_model(init = config["init"],equiv=config["equiv"],rand=config["rand"], freeze =config["freeze"],skip = config["skip"],hidden_size =config["hidden_size"], n_hidden_layers = config["n_hidden_layers"],activation = config["activation"])
 symm_net.run_training(train_loader = symm_net.train_loader,nepochs = config["nepochs"],lam_vec = config["lam_vec"],seed = seed_train, lr = config["lr"],symm_norm = config["symm_norm"])
 
 

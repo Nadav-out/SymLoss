@@ -234,19 +234,23 @@ class genNet(nn.Module):
             self.bi_tensor = bi_tensor.to(devicef)
             
             if (freeze =="False" or freeze == False):
-                self.bi_tensor = torch.nn.Parameter(bi_tensor)
+                
+                self.bi_tensor = torch.nn.Parameter(bi_tensor.to(devicef))
                 self.bi_tensor.requires_grad_()
 
             self.equiv_layer = nn.Linear(1, input_size)
             self.skip_layer = nn.Linear(input_size, input_size)
+            
 
     def forward(self,x):
 
         if self.equiv=="True":
             y = torch.einsum("...i,ij,...j-> ...",x,self.bi_tensor,x).unsqueeze(1)
+            
             y = self.equiv_layer(y)
+            
             if self.skip =="True":
-                y = self.equiv_layer(y) + self.skip_layer(x)
+                y = y + self.skip_layer(x)
         else:
             y = x
 
@@ -266,6 +270,9 @@ class symm_net_train():
         self.symm_loss_lam = {}
         self.tot_loss_lam = {}
         self.models = {}
+        self.models_best_tot = {}
+        self.models_best_symm = {}
+        self.models_best_MSE = {}
 
         self.init = init
         self.equiv = equiv
@@ -311,12 +318,13 @@ class symm_net_train():
         self.init = init
         self.equiv = equiv
         self.rand=rand
-        self.freeze = freeze, 
+        self.freeze = freeze 
         self.activation = activation
         self.skip=skip
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.n_hidden_layers = n_hidden_layers
+        
 
     def run_training(self,train_loader,nepochs = 1000,lam_vec = [0.0],seed = 98235, lr = 1e-3, opt = "Adam",symm_norm = "False"):    
         lam = lam_vec
@@ -332,6 +340,7 @@ class symm_net_train():
         models = {}
         self.lr = lr
         self.opt = opt
+        self.symm_norm = symm_norm
         train_loader_copy = copy.deepcopy(train_loader)
 
         if train_loader =="self":
@@ -383,7 +392,9 @@ class symm_net_train():
             end_symm = 0.0
             deltat_MSE = 0.0
             deltat_symm = 0.0
-            
+            symm_loss_min = 10000000
+            MSE_loss_min = 10000000
+            tot_loss_min = 10000000
             
             for epoch in range(nepochs):
                 model.train()
@@ -428,12 +439,41 @@ class symm_net_train():
                     optimizer.step()
                     running_loss += loss.item()
                     symm_loss += loss_symm.item()
-                train_loss.append(running_loss / (1.0*len(train_loader_copy)))
-                symm_loss_vec.append(symm_loss / (1.0*len(train_loader_copy)))
-                tot_loss_vec.append((lam_val*symm_loss+running_loss) / (1.0*len(train_loader_copy)))
-                if epoch % 100 == 0:
+                
+                symm_loss_epoch = symm_loss / (1.0*len(train_loader_copy))
+                running_loss_epoch = running_loss / (1.0*len(train_loader_copy))
+                tot_loss_epoch = (lam_val*symm_loss+running_loss) / (1.0*len(train_loader_copy))
+                
+                
+                train_loss.append(running_loss_epoch)
+                symm_loss_vec.append(symm_loss_epoch)
+                tot_loss_vec.append(tot_loss_epoch)
+                
+                
+                # train_loss.append(running_loss / (1.0*len(train_loader_copy)))
+                # symm_loss_vec.append(symm_loss / (1.0*len(train_loader_copy)))
+                # tot_loss_vec.append((lam_val*symm_loss+running_loss) / (1.0*len(train_loader_copy)))
+                
+                #monitor
+                if (epoch % 100 == 0) or (epoch == nepochs-1):
                     print(f"time for 1 epoch 1 batch MSE: {(deltat_MSE)/((epoch+1)*len(train_loader_copy))}, symm:{(deltat_symm)/((epoch+1)*len(train_loader_copy))}")
                     print(f"lambda = {lam_val} Epoch {epoch+1}, MSE loss: {train_loss[-1]:}, Lorentz loss: {symm_loss_vec[-1]:}")
+                    if self.equiv =="True": 
+                        print(f"bi-linear tensor layer:\n {model.bi_tensor}")
+                        #print(f"bi-linear tensor grad:\n {model.bi_tensor.grad}")
+                        if self.skip =="True":
+                            print(f"skip layer: \n {model.skip_layer}")
+                
+                #save best model
+                if  symm_loss_epoch < symm_loss_min:
+                    symm_loss_min = symm_loss_epoch
+                    self.models_best_symm[lam_val] = copy.deepcopy(model)
+                if  running_loss_epoch < MSE_loss_min:
+                    MSE_loss_min = running_loss_epoch
+                    self.models_best_MSE[lam_val] = copy.deepcopy(model)
+                if  tot_loss_epoch < tot_loss_min:
+                    tot_loss_min = tot_loss_epoch
+                    self.models_best_tot[lam_val] = copy.deepcopy(model)
                     
             
             self.train_loss_lam[lam_val] = train_loss
@@ -441,99 +481,11 @@ class symm_net_train():
             self.tot_loss_lam[lam_val] = tot_loss_vec
             
             model_clone = copy.deepcopy(model)
-            self.models[lam_val] = model_clone#model.load_state_dict(model.state_dict())
-            if self.equiv =="True": 
-                print(f"bi-linear tensor layer:{model.bi_tensor}")
-                if self.skip =="True":
-                    print(f"skip layer:{model.skip_layer}")
+            self.models[lam_val] = model_clone
+            
                     
                     
-    def run_training_no_symm(self,train_loader,nepochs = 1000,lam_vec = [0.0],seed = 98235, lr = 1e-3, opt = "Adam",symm_norm = "False"):    
-        lam = [0.0]
-        # Train the model, store train and test loss, print the loss every epoch
-        train_loss = []
-        symm_loss_vec = []
-        tot_loss_vec = []
-        running_loss = 0.0
-        symm_loss = 0.0
-        train_loss_lam = {}
-        symm_loss_lam= {}
-        tot_loss_lam = {}
-        models = {}
-        self.lr = lr
-        self.opt = opt
 
-        if train_loader =="self":
-
-            train_loader = self.train_loader
-        
-        self.train_seed = seed
-
-        for lam_val in lam:
-            
-            np.random.seed(seed)
-            torch.manual_seed(seed)
-            #self.prepare_dataset()
-            modelLorentz_symm = genNet(input_size = self.input_size, init = self.init ,equiv=self.equiv,rand=self.rand,freeze = self.freeze,activation = self.activation, skip = self.skip, n_hidden_layers = self.n_hidden_layers, hidden_size=self.hidden_size)
-            
-            
-            model = modelLorentz_symm.to(devicef)
-        
-            # Define the loss function and optimizer
-            if self.opt == "SGD":
-                optimizer = optim.SGD(model.parameters(), lr=lr, momentum = 0.9)
-
-            elif self.opt =="GD":
-                optimizer = optim.GD(model.parameters(), lr=lr)
-            
-            else:
-                optimizer = optim.Adam(model.parameters(), lr=lr)
-
-
-            criterion = nn.MSELoss()
-            #criterion_Lorentz = SymmLoss(gens_list=self.gens_list, model = model)
-
-            train_loss = []
-            symm_loss_vec = []
-            tot_loss_vec = []
-            running_loss = 0.0
-            symm_loss = 0.0
-
-            for epoch in range(nepochs):
-                model.train()
-                running_loss = 0.0
-                symm_loss = 0.0
-                for i, data in enumerate(train_loader):
-                    inputs, labels = data
-                    labels = torch.unsqueeze(labels.to(devicef),1)
-                    inputs = inputs.to(devicef)
-                    optimizer.zero_grad()
-                    outputs = model(inputs)
-                    loss = criterion(outputs, labels)
-                    
-                    loss_tot = loss
-                    loss_tot.backward()
-                    optimizer.step()
-                    running_loss += loss.item()
-                    
-                train_loss.append(running_loss / len(train_loader))
-                
-                tot_loss_vec.append((running_loss) / len(train_loader))
-                if epoch % 100 == 0:
-                    print(f"lambda = {lam_val} Epoch {epoch+1}, MSE loss: {train_loss[-1]:}")
-                    
-            
-            self.train_loss_lam[lam_val] = train_loss
-            
-            
-            model_clone = copy.deepcopy(model)
-            self.models[lam_val] = model_clone#model.load_state_dict(model.state_dict())
-            if self.equiv =="True": 
-                print(f"bi-linear tensor layer:{model.bi_tensor}")
-                if self.skip =="True":
-                    print(f"skip layer:{model.skip_layer}")
-
-       
 
 class analysis_trained(symm_net_train):
 
@@ -554,6 +506,8 @@ class analysis_trained(symm_net_train):
                 text=f"{text} init: {self.init}"
             if self.freeze=="True":
                 text=f"{text} freeze"
+        if self.symm_norm == "True" or self.symm_norm == True:
+                text = f"{text} norm"
         self.title_text = text
         self.filename = self.title_text.replace(" ","_").replace(":","_")+f"data_seed_{self.dataset_seed}_train_seed_{self.train_seed}"
         return text
