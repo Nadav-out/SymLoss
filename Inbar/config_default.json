@@ -15,6 +15,8 @@
     "lr" : 1e-3,
     "opt" : "Adam",
     "batch_size": "all",
-    "symm_norm": "False"
+    "symm_norm": "False",
+    "broken_symm":"False",
+    "spurions":[[0.0,0.0,0.0,0.0]]
 }
     

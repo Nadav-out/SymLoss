@@ -8,7 +8,7 @@ import einops
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
-import pickle
+import dill as pickle
 import os
 import time
 
@@ -51,6 +51,25 @@ devicef = (
     else "cpu"
 )
 print(f"Using {devicef} device")
+
+
+def Lorentz_myfun(input):
+        m2 = torch.einsum("... i, ij, ...j -> ...",input, torch.diag(torch.tensor([1.00,-1.00,-1.00,-1.00])), input)
+        out = m2**2+15*m2
+        return out.unsqueeze(1)
+
+def Lorentz_myfun_broken(input,spurions = [torch.tensor([0.0,0.0,0.0,0.0])]):
+    metric_tensor = torch.diag(torch.tensor([1.00,-1.00,-1.00,-1.00]))
+    m2 = torch.einsum("... i, ij, ...j -> ...",input, metric_tensor, input)
+    breaking_scalars = [torch.einsum("... i, ij, ...j -> ...",spurion, metric_tensor, input) for spurion in spurions]
+    coeffs = [20.9983, -23.2444, 3.0459, 12.7176, -17.4378, 1.4378, 10.1877,15.8890, -11.5178,  -4.3926]
+    coeffs_2 = [-0.8431,   5.7529,  19.0048,   3.2927, -14.9460,   5.6997,  -5.9202, -10.5052, 2.6883, 16.5809]
+    symm_out = m2**2+15*m2
+    out = symm_out
+    for i in range(len(breaking_scalars)):
+        out += coeffs[i%len(coeffs)]*breaking_scalars[i]+coeffs_2[i%len(coeffs_2)]*breaking_scalars[i]**2
+    return out.unsqueeze(1).to(devicef)
+
 
 
 
@@ -184,6 +203,42 @@ class inv_model(nn.Module):
         # x = torch.dot(x,y)
         return y
 
+    
+    
+class broken_model(nn.Module):
+    
+    def __init__(self,dinput = 4, doutput = 1,init = "rand",spurions = [torch.tensor([0.0,0.0,0.0,0.0])]):
+        super(broken_model,self).__init__()
+
+        bi_tensor = torch.randn(dinput,dinput)
+
+        if init=="eta":
+            diag = torch.ones(dinput)*(-1.00)
+            diag[0]=1.00
+            bi_tensor = torch.diag(diag)
+
+        elif init=="delta":
+            bi_tensor = torch.diag(torch.ones(dinput)*1.00)
+        
+        
+        bi_tensor = (bi_tensor+torch.transpose(bi_tensor,0,1))*0.5
+        self.bi_tensor = torch.nn.Parameter(bi_tensor)
+        self.bi_tensor.requires_grad_()
+        self.spurions = spurions
+        self.coeffs = [20.9983, -23.2444, 3.0459, 12.7176, -17.4378, 1.4378, 10.1877,15.8890, -11.5178,  -4.3926]
+        self.coeffs_2 = [-0.8431,   5.7529,  19.0048,   3.2927, -14.9460,   5.6997,  -5.9202, -10.5052, 2.6883, 16.5809]
+        
+    def forward(self,x, sig = "euc", d = 3 ):
+        #y = x @ (self.bi_tensor @ x.T)
+        m2 = torch.einsum("...i,ij,...j-> ...",x,self.bi_tensor,x)
+        breaking_scalars = [torch.einsum("... i, ij, ...j -> ...",spurion.to(devicef), self.bi_tensor, x) for spurion in self.spurions]
+        
+        symm_out = m2**2+15*m2
+        out = symm_out
+        for i in range(len(breaking_scalars)):
+            out += self.coeffs[i%len(self.coeffs)]*breaking_scalars[i]+self.coeffs_2[i%len(self.coeffs_2)]*breaking_scalars[i]**2
+            # x = torch.dot(x,y)
+        return out
 
 
 class genNet(nn.Module):
@@ -260,7 +315,7 @@ class genNet(nn.Module):
 
 class symm_net_train():
 
-    def __init__(self,gens_list=gens_Lorentz,input_size = 4,init = "rand",equiv="False",rand="False",freeze = "False", activation = "ReLU", skip="False"):
+    def __init__(self,gens_list=gens_Lorentz,input_size = 4,init = "rand",equiv="False",rand="False",freeze = "False", activation = "ReLU", skip="False",broken_symm = "False",spurions = torch.diag(torch.tensor([0.00,0.00,0.00,0.00]))):
         self.train_loss_vec = []
         self.symm_loss_vec = []
         self.tot_loss_vec = []
@@ -286,13 +341,28 @@ class symm_net_train():
         self.dataset_seed = 0
         self.train_seed = 0
         self.N = 0
+        
+        self.broken_symm = broken_symm
+        self.spurions = spurions
 
-    def Lorentz_myfun(input):
-        m2 = torch.einsum("... i, ij, ...j -> ...",input, torch.diag(torch.tensor([1.00,-1.00,-1.00,-1.00])), input)
-        out = m2**2+15*m2
-        return out.unsqueeze(1)
+#     def Lorentz_myfun(input):
+#         m2 = torch.einsum("... i, ij, ...j -> ...",input, torch.diag(torch.tensor([1.00,-1.00,-1.00,-1.00])), input)
+#         out = m2**2+15*m2
+#         return out.unsqueeze(1)
+    
+#     def Lorentz_myfun_broken(input,spurions = [torch.tensor([0.0,0.0,0.0,0.0])]):
+#         metric_tensor = torch.diag(torch.tensor([1.00,-1.00,-1.00,-1.00])).to(devicef)
+#         m2 = torch.einsum("... i, ij, ...j -> ...",input, metric_tensor, input)
+#         breaking_scalars = [torch.einsum("... i, ij, ...j -> ...",spurion.to(devicef), metric_tensor, input) for spurion in spurions]
+#         coeffs = [20.9983, -23.2444, 3.0459, 12.7176, -17.4378, 1.4378, 10.1877,15.8890, -11.5178,  -4.3926]
+#         coeffs_2 = [-0.8431,   5.7529,  19.0048,   3.2927, -14.9460,   5.6997,  -5.9202, -10.5052, 2.6883, 16.5809]
+#         symm_out = m2**2+15*m2
+#         out = symm_out
+#         for i in range(len(breaking_scalars)):
+#             out += coeffs[i%len(coeffs)]*breaking_scalars[i]+coeffs_2[i%len(coeffs_2)]*breaking_scalars[i]**2
+#         return out.unsqueeze(1).to(devicef)
 
-    def prepare_dataset(self, N = 1000, dinput = 4, norm = 1, true_func = Lorentz_myfun, batch_size="all", shuffle=False, seed = 98235):
+    def prepare_dataset(self, N = 1000, dinput = 4, norm = 1, true_func = Lorentz_myfun, batch_size="all", shuffle=False, seed = 98235, broken_symm = "False", spurions = [[0.0,0.0,0.0,0.0]]):
         
         self.N = N
         self.dataset_seed = seed
@@ -300,8 +370,13 @@ class symm_net_train():
         torch.manual_seed(seed)
         
         train_data = (torch.rand(N,dinput)-0.5)*norm
-        #train_m2 = torch.einsum("... i, ij, ...j -> ...",train_data, torch.diag(torch.tensor([1.00,-1.00,-1.00,-1.00])), train_data)
-        train_labels = true_func(train_data).squeeze()
+        
+        self.broken_symm = broken_symm
+        self.spurions = [torch.tensor(spurion) for spurion in spurions]
+        self.true_func = lambda input: true_func(input,spurions = self.spurions) if (broken_symm == "True" or broken_symm == True) else true_func
+        
+        
+        train_labels = self.true_func(train_data).squeeze() #if (broken_symm == "True" or broken_symm == True) else true_func(train_data).squeeze()
         
         if batch_size=="all":
             batch_size = N
@@ -498,6 +573,13 @@ class analysis_trained(symm_net_train):
     
     def title(self):
         text = f"N:{self.N} hidden size:{self.hidden_size} layers:{self.n_hidden_layers} activation:{self.activation} lr:{self.lr} opt:{self.opt} "
+        self.spurions_for_print = ""
+        if self.broken_symm == "True" or self.broken_symm == True:
+            text=f"{text} broken symm"
+            spurions_for_print = "spurions:\n"
+            for spurion in self.spurions:
+                spurions_for_print+= f"{spurion}\n"
+            self.spurions_for_print = spurions_for_print
         if self.equiv== "True":
             text=f"{text} bi-linear layer"
             if self.skip =="True":
@@ -517,7 +599,7 @@ class analysis_trained(symm_net_train):
         with open(f'{outdir}/{filename}.pkl', 'wb') as f:  # Python 3: open(..., 'wb')
             pickle.dump(self, f)
 
-    def plot_losses(self,save = False, outdir = "./",filename = ""):
+    def plot_losses(self,save = False, outdir = "./",filename = "",print_spurions = False):
 
         color_vec = ["violet","blue","green","yellow","orange","red","pink"]
         train_loss_lam = self.train_loss_lam
@@ -534,12 +616,15 @@ class analysis_trained(symm_net_train):
         text = self.title()
         plt.title(text)
         
+        if print_spurions == "True" or print_spurions == True:
+            plt.annotate(self.spurions_for_print,xy=(0.05,0.7),xycoords = "axes fraction")
+        
         if save==True or save=="True":
             if filename =="":
                 filename = "plot_losses_"+self.filename
             plt.savefig(f"{outdir}/{filename}.pdf")
     
-    def plot_symm_loss(self,save = False, outdir = "./",filename = ""):
+    def plot_symm_loss(self,save = False, outdir = "./",filename = "",print_spurions = False):
         color_vec = ["violet","blue","green","yellow","orange","red","pink"]
         #train_loss_lam = self.train_loss_lam
         symm_loss_lam = self.symm_loss_lam
@@ -555,13 +640,16 @@ class analysis_trained(symm_net_train):
         text = self.title()
         plt.title(text)
         
+        if print_spurions == "True" or print_spurions == True:
+            plt.annotate(self.spurions_for_print,xy=(0.05,0.7),xycoords = "axes fraction")
+        
         if save==True or save=="True":
             if filename =="":
                 filename = "plot_symm_losses_"+self.filename
             plt.savefig(f"{outdir}/{filename}.pdf")
 
     
-    def plot_MSE_loss(self,save = False, outdir = "./",filename = ""):
+    def plot_MSE_loss(self,save = False, outdir = "./",filename = "",print_spurions = False):
         color_vec = ["violet","blue","green","yellow","orange","red","pink"]
         train_loss_lam = self.train_loss_lam
         #symm_loss_lam = self.symm_loss_lam
@@ -576,13 +664,16 @@ class analysis_trained(symm_net_train):
         text = self.title()
         plt.title(text)
         
+        if print_spurions == "True" or print_spurions == True:
+            plt.annotate(self.spurions_for_print,xy=(0.05,0.7),xycoords = "axes fraction")
+        
         if save==True or save=="True":
             if filename =="":
                 filename = "plot_MSE_losses_"+self.filename
             plt.savefig(f"{outdir}/{filename}.pdf")
 
     
-    def pred_plot(self,save = False, outdir = "./",filename = ""):
+    def pred_plot(self,save = False, outdir = "./",filename = "",print_spurions = False):
         inputs = self.train_data.to(devicef)
         plt.clf()
         fig = {}
@@ -595,6 +686,9 @@ class analysis_trained(symm_net_train):
             plt.xlabel("truth")
             plt.ylabel("pred")
             
+            if print_spurions == "True" or print_spurions == True:
+                plt.annotate(self.spurions_for_print,xy=(0.05,0.7),xycoords = "axes fraction")
+            
             if save==True or save=="True":
                 if filename =="":
                     file = f"plot_pred_lam_{lam_val}_{self.filename}"
@@ -604,6 +698,58 @@ class analysis_trained(symm_net_train):
                 fig[lam_val].savefig(f"{outdir}/{file}.pdf")
             #plt.show()
                 plt.close(fig[lam_val])
+                
+    def pred_plot_ext(self,data,model = "last",save = False, outdir = "./",filename = "",print_spurions = False):
+        inputs = self.train_data.to(devicef)
+        plt.clf()
+        fig = {}
+        if model == "last":
+            models = self.models
+            ext = ""
+        elif model== "symm":
+            models = self.models_best_symm
+            ext = "_best_symm"
+        elif model == "MSE":
+            models = self.models_best_MSE
+            ext = "_best_MSE"
+        elif model == "tot":
+            models = self.models_best_tot
+            ext = "_best_tot"
+            
+        for lam_val in self.models.keys():
+            plt.clf()
+            fig[lam_val] = plt.figure()
+            plt.scatter(self.train_labels.cpu().squeeze(),models[lam_val](inputs).detach().cpu().squeeze(),label = rf"$\lambda$ = {lam_val} training data")
+            plt.scatter(Lorentz_myfun(data).cpu().squeeze(),models[lam_val](data).detach().cpu().squeeze(),label = rf"$\lambda$ = {lam_val} new data",color = "pink",alpha = 0.2)
+            plt.plot(Lorentz_myfun(data).cpu().squeeze(),Lorentz_myfun(data).cpu().squeeze(),color = "black")
+            plt.legend()
+            plt.xlabel("truth")
+            plt.ylabel("pred")
+            err = ((Lorentz_myfun(data).cpu().squeeze()-models[lam_val](data).detach().cpu().squeeze())**2).mean()
+            #err = '%.4E' % Decimal("f{err}")
+            err = "{:.4e}".format(err)
+            mse = self.train_loss_lam[lam_val][-1]
+            mse = "{:.4e}".format(mse)
+            symm = self.symm_loss_lam[lam_val][-1]
+            symm = "{:.4e}".format(symm)
+            text = f"lam = {lam_val}, var = {err} MSE = {mse}, symm = {symm}"
+            print(text)
+            text = f"var = {err}, MSE = {mse}, symm = {symm}"
+            plt.text(-9, -10,text)
+            
+            if print_spurions != "False" or print_spurions != False:
+                plt.annotate(self.spurions_for_print,xy=(0.05,0.7),xycoords = "axes fraction")
+            
+            if save==True or save=="True":
+                if filename =="":
+                    file = f"plot_pred{ext}_lam_{lam_val}_{self.filename}"
+                else:
+                    file = filename
+                fig[lam_val].show()
+                fig[lam_val].savefig(f"{outdir}/plot_pred_lam_{lam_val}_{file}_{self.filename}.pdf")
+            plt.show()
+                #plt.close(fig[lam_val])
+
 
         
             
