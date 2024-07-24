@@ -1,0 +1,22 @@
+{
+    "input_size":4,
+    "output_size":1,
+    "hidden_size":300,
+    "n_hidden_layers":3,
+    "init": "rand",
+    "equiv": "False",
+    "rand": "True",
+    "freeze": "False",
+    "activation": "GeLU",
+    "skip": "False",
+    "N" : 100000,
+    "nepochs" : 300,
+    "lam_vec" : [0.0,0.1,1.0,10.0,100.0],
+    "lr" : 5e-5,
+    "opt" : "Adam",
+    "batch_size": 1000,
+    "symm_norm": "True",
+    "broken_symm":"True",
+    "spurions":[[0.0,0.0,0.0,1.0]]
+}
+    
