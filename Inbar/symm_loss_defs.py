@@ -93,7 +93,7 @@ class SymmLoss(nn.Module):
         # Compute model output, shape [B]
         output = self.model(input)
 
-        # Compute gradients with respect to input, shape [B, d*N], B is the batch size, d is the inpur irrep dimension, N is the number of particles
+        # Compute gradients with respect to input, shape [B, d*N], B is the batch size, d is the input irrep dimension, N is the number of particles
         grads, = torch.autograd.grad(outputs=output, inputs=input, grad_outputs=torch.ones_like(output, device=self.device), create_graph=True)
         
         # Reshape grads to [B, N, d] 
@@ -362,7 +362,7 @@ class symm_net_train():
 #             out += coeffs[i%len(coeffs)]*breaking_scalars[i]+coeffs_2[i%len(coeffs_2)]*breaking_scalars[i]**2
 #         return out.unsqueeze(1).to(devicef)
 
-    def prepare_dataset(self, N = 1000, dinput = 4, norm = 1, true_func = Lorentz_myfun, batch_size="all", shuffle=False, seed = 98235, broken_symm = "False", spurions = [[0.0,0.0,0.0,0.0]]):
+    def prepare_dataset(self, N = 1000, dinput = 4, norm = 1, true_func = Lorentz_myfun, batch_size="all", shuffle=False, seed = 98235, broken_symm = "False", spurions = [[0.0,0.0,0.0,0.0]],input_spurions = "False"):
         
         self.N = N
         self.dataset_seed = seed
@@ -374,6 +374,7 @@ class symm_net_train():
         self.broken_symm = broken_symm
         self.spurions = [torch.tensor(spurion) for spurion in spurions]
         self.true_func = lambda input: true_func(input,spurions = self.spurions) if (broken_symm == "True" or broken_symm == True) else true_func
+        self.input_spurions = input_spurions
         
         
         train_labels = self.true_func(train_data).squeeze() #if (broken_symm == "True" or broken_symm == True) else true_func(train_data).squeeze()
@@ -381,8 +382,12 @@ class symm_net_train():
         if batch_size=="all":
             batch_size = N
 
-        # train_labels = torch.tensor(train_labels, dtype=torch.float32)
-        # train_data = torch.tensor(train_data, dtype=torch.float32)
+        if self.input_spurions == "True" or self.input_spurions==True:
+            expand_spurions = (torch.cat(self.spurions)).expand(N,dinput)
+            train_data = torch.cat((train_data,expand_spurions),dim = -1)
+            self.input_size = train_data.shape[-1]
+        
+        
         train_dataset = TensorDataset(train_data,train_labels)
         self.train_dataset = train_dataset
         self.train_data = train_data
@@ -396,9 +401,10 @@ class symm_net_train():
         self.freeze = freeze 
         self.activation = activation
         self.skip=skip
-        self.input_size = input_size
+        self.input_size = input_size+sum([torch.numel(sp) for sp in self.spurions]) if (self.input_spurions == "True" or self.input_spurions==True) else input_size
         self.hidden_size = hidden_size
         self.n_hidden_layers = n_hidden_layers
+        
         
 
     def run_training(self,train_loader,nepochs = 1000,lam_vec = [0.0],seed = 98235, lr = 1e-3, opt = "Adam",symm_norm = "False"):    
@@ -514,7 +520,7 @@ class symm_net_train():
                     optimizer.step()
                     running_loss += loss.item()
                     symm_loss += loss_symm.item()
-                
+                                
                 symm_loss_epoch = symm_loss / (1.0*len(train_loader_copy))
                 running_loss_epoch = running_loss / (1.0*len(train_loader_copy))
                 tot_loss_epoch = (lam_val*symm_loss+running_loss) / (1.0*len(train_loader_copy))
@@ -577,6 +583,8 @@ class analysis_trained(symm_net_train):
         if self.broken_symm == "True" or self.broken_symm == True:
             text=f"{text} broken symm"
             spurions_for_print = "spurions:\n"
+            if self.input_spurions == "True" or self.input_spurions == True:
+                text = f"{text} input spurions"
             for spurion in self.spurions:
                 spurions_for_print+= f"{spurion}\n"
             self.spurions_for_print = spurions_for_print
@@ -716,16 +724,21 @@ class analysis_trained(symm_net_train):
             models = self.models_best_tot
             ext = "_best_tot"
             
+        if self.broken_symm == "True" or self.broken_symm == True:
+            truth_new = Lorentz_myfun_broken(data,spurions = self.spurions)
+        else:
+            truth_new = Lorentz_myfun(data)
+            
         for lam_val in self.models.keys():
             plt.clf()
             fig[lam_val] = plt.figure()
             plt.scatter(self.train_labels.cpu().squeeze(),models[lam_val](inputs).detach().cpu().squeeze(),label = rf"$\lambda$ = {lam_val} training data")
-            plt.scatter(Lorentz_myfun(data).cpu().squeeze(),models[lam_val](data).detach().cpu().squeeze(),label = rf"$\lambda$ = {lam_val} new data",color = "pink",alpha = 0.2)
-            plt.plot(Lorentz_myfun(data).cpu().squeeze(),Lorentz_myfun(data).cpu().squeeze(),color = "black")
+            plt.scatter(truth_new.cpu().squeeze(),models[lam_val](data).detach().cpu().squeeze(),label = rf"$\lambda$ = {lam_val} new data",color = "pink",alpha = 0.2)
+            plt.plot(truth_new.cpu().squeeze(),truth_new.cpu().squeeze(),color = "black")
             plt.legend()
             plt.xlabel("truth")
             plt.ylabel("pred")
-            err = ((Lorentz_myfun(data).cpu().squeeze()-models[lam_val](data).detach().cpu().squeeze())**2).mean()
+            err = ((truth_new.cpu().squeeze()-models[lam_val](data).detach().cpu().squeeze())**2).mean()
             #err = '%.4E' % Decimal("f{err}")
             err = "{:.4e}".format(err)
             mse = self.train_loss_lam[lam_val][-1]

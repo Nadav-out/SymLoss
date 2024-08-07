@@ -17,6 +17,7 @@
     "batch_size": "all",
     "symm_norm": "False",
     "broken_symm":"False",
-    "spurions":[[0.0,0.0,0.0,0.0]]
+    "spurions":[[0.0,0.0,0.0,0.0]],
+    "input_spurions":"False"
 }
     
