@@ -11,13 +11,13 @@
     "skip": "False",
     "N" : 100000,
     "nepochs" : 1000,
-    "lam_vec" : [0.0,0.01,0.1,1.0,10.0],
+    "lam_vec" : [0.0,0.1,1.0,5.0,10.0,50.0,100.0,500,1000.0],
     "lr" : 1e-5,
     "opt" : "Adam",
     "batch_size": 1000,
     "symm_norm": "False",
     "broken_symm":"True",
-    "spurions":[[0.0,0.0,0.0,1.0]],
-    "input_spurions":"True"
+    "spurions":[[0.0,0.0,0.0,0.001]],
+    "input_spurions":"False"
 }
     

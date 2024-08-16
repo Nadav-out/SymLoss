@@ -609,15 +609,15 @@ class analysis_trained(symm_net_train):
 
     def plot_losses(self,save = False, outdir = "./",filename = "",print_spurions = False):
 
-        color_vec = ["violet","blue","green","yellow","orange","red","pink"]
+        color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
         train_loss_lam = self.train_loss_lam
         symm_loss_lam = self.symm_loss_lam
         models = self.models
         
         plt.figure()
         for i,lam_val in enumerate(models.keys()):
-            plt.semilogy(range(len(train_loss_lam[lam_val])),train_loss_lam[lam_val],label = rf"$\lambda$ = {lam_val}, MSE", color = color_vec[i])
-            plt.semilogy(range(len(symm_loss_lam[lam_val])),symm_loss_lam[lam_val],label = rf"$\lambda$ = {lam_val}, symm", color = color_vec[i],ls = "--")
+            plt.semilogy(range(len(train_loss_lam[lam_val])),train_loss_lam[lam_val],label = rf"$\lambda$ = {lam_val}, MSE", color = color_vec[i%len(color_vec)])
+            plt.semilogy(range(len(symm_loss_lam[lam_val])),symm_loss_lam[lam_val],label = rf"$\lambda$ = {lam_val}, symm", color = color_vec[i%len(color_vec)],ls = "--")
         plt.legend()
         plt.xlabel("epoch")
         plt.ylabel("loss")
@@ -633,7 +633,7 @@ class analysis_trained(symm_net_train):
             plt.savefig(f"{outdir}/{filename}.pdf")
     
     def plot_symm_loss(self,save = False, outdir = "./",filename = "",print_spurions = False):
-        color_vec = ["violet","blue","green","yellow","orange","red","pink"]
+        color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
         #train_loss_lam = self.train_loss_lam
         symm_loss_lam = self.symm_loss_lam
         models = self.models
@@ -641,7 +641,7 @@ class analysis_trained(symm_net_train):
         plt.figure()
         for i,lam_val in enumerate(models.keys()):
             #plt.semilogy(range(len(train_loss_lam[lam_val])),train_loss_lam[lam_val],label = rf"$\lambda$ = {lam_val}, MSE", color = color_vec[i])
-            plt.semilogy(range(len(symm_loss_lam[lam_val])),symm_loss_lam[lam_val],label = rf"$\lambda$ = {lam_val}, symm", color = color_vec[i])
+            plt.semilogy(range(len(symm_loss_lam[lam_val])),symm_loss_lam[lam_val],label = rf"$\lambda$ = {lam_val}, symm", color = color_vec[i%len(color_vec)])
         plt.legend()
         plt.xlabel("epoch")
         plt.ylabel("symm loss")
@@ -658,14 +658,14 @@ class analysis_trained(symm_net_train):
 
     
     def plot_MSE_loss(self,save = False, outdir = "./",filename = "",print_spurions = False):
-        color_vec = ["violet","blue","green","yellow","orange","red","pink"]
+        color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
         train_loss_lam = self.train_loss_lam
         #symm_loss_lam = self.symm_loss_lam
         models = self.models
         
         plt.figure()
         for i,lam_val in enumerate(models.keys()):
-            plt.semilogy(range(len(train_loss_lam[lam_val])),train_loss_lam[lam_val],label = rf"$\lambda$ = {lam_val}, MSE", color = color_vec[i])
+            plt.semilogy(range(len(train_loss_lam[lam_val])),train_loss_lam[lam_val],label = rf"$\lambda$ = {lam_val}, MSE", color = color_vec[i%len(color_vec)])
         plt.legend()
         plt.xlabel("epoch")
         plt.ylabel("MSE loss")

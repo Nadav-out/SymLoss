@@ -1,0 +1,18 @@
+{
+    "input_size":9,
+    "input_dim":9,
+    "ML_model":"DeepSet",
+    "rho_size":256,
+    "phi_size":128,
+    "output_size":1,
+    "hidden_size":300,
+    "n_hidden_layers":3,
+    "activation": "ReLU",
+    "nepochs":1,
+    "lam_vec" :[0.0],
+    "lr" : 5e-4,
+    "opt" : "Adam",
+    "batch_size": 512,
+    "symm_norm": "True"
+}
+    
