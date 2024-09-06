@@ -373,6 +373,7 @@ class symm_net_train():
         
         self.broken_symm = broken_symm
         self.spurions = [torch.tensor(spurion) for spurion in spurions]
+        self.spurions_list = spurions
         self.true_func = lambda input: true_func(input,spurions = self.spurions) if (broken_symm == "True" or broken_symm == True) else true_func
         self.input_spurions = input_spurions
         
@@ -578,16 +579,22 @@ class analysis_trained(symm_net_train):
         
     
     def title(self):
-        text = f"N:{self.N} hidden size:{self.hidden_size} layers:{self.n_hidden_layers} activation:{self.activation} lr:{self.lr} opt:{self.opt} "
+        #text = f"N:{self.N} hidden size:{self.hidden_size} layers:{self.n_hidden_layers} activation:{self.activation} lr:{self.lr} opt:{self.opt}"
+        text = f"toy N:{self.N} lr:{self.lr}"
         self.spurions_for_print = ""
         if self.broken_symm == "True" or self.broken_symm == True:
             text=f"{text} broken symm"
             spurions_for_print = "spurions:\n"
+            text_spurions = f" "
             if self.input_spurions == "True" or self.input_spurions == True:
                 text = f"{text} input spurions"
-            for spurion in self.spurions:
+            for spurion in self.spurions_list:
                 spurions_for_print+= f"{spurion}\n"
+                spurion_text = f"{spurion}"
+                #spurion_text = spurion_text
+                text_spurions += f"spurion: {spurion_text}"
             self.spurions_for_print = spurions_for_print
+            text = f"{text}{text_spurions}"
         if self.equiv== "True":
             text=f"{text} bi-linear layer"
             if self.skip =="True":
@@ -599,7 +606,9 @@ class analysis_trained(symm_net_train):
         if self.symm_norm == "True" or self.symm_norm == True:
                 text = f"{text} norm"
         self.title_text = text
-        self.filename = self.title_text.replace(" ","_").replace(":","_")+f"data_seed_{self.dataset_seed}_train_seed_{self.train_seed}"
+       
+        self.filename = text.replace("[","").replace("]","").replace(",","_").replace(":","_").replace(" ","_")+f"_data_seed_{self.dataset_seed}_train_seed_{self.train_seed}"
+
         return text
     
     def save_trained(self,outdir = "./storage"):

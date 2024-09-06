@@ -9,7 +9,7 @@
     "n_hidden_layers":3,
     "activation": "ReLU",
     "N": 500000,
-    "nepochs":30,
+    "nepochs":20,
     "lam_vec" :[0.0,0.1,1.0,10.0,100.0,1000.0,10000.0],
     "lr" : 5e-4,
     "opt" : "Adam",

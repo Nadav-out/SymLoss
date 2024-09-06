@@ -849,7 +849,7 @@ class top_analysis_trained(top_symm_net_train):
     
     def plot_task_loss(self,save = False, outdir = "./",filename = "",print_spurions = False):
         color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
-        train_loss_lam = self.train_loss_lam
+        train_loss_lam = self.train_outputs
         #symm_loss_lam = self.symm_loss_lam
         models = self.models
         
