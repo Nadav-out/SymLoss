@@ -11,7 +11,7 @@
     "skip" : "False",
     "N" : 1000,
     "nepochs" : 1000,
-    "lam_vec" : [0.1,0.01,0.0],
+    "lam_vec" : [0.0],
     "lr" : 1e-3,
     "opt" : "Adam",
     "batch_size": "all",

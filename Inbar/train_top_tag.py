@@ -78,6 +78,8 @@ nepochs = config["nepochs"]
 lamb_vec = config["lam_vec"]
 print(lamb_vec)
 lr = config["lr"]
+apply_MSE = config["apply_MSE"]
+apply_symm = config["apply_symm"]
 
 
 # broken_symm = config["broken_symm"]
@@ -90,7 +92,7 @@ lr = config["lr"]
 train_loader = symm_net.prepare_dataset(batch_size = config["batch_size"],set_seed = True, seed = seed_data, nj = nj)
 
 symm_net.set_model(ML_model = ML_model,input_dim = input_dim,rho_size =rho_size, phi_size = phi_size, hidden_size =hidden_size , activation = activation)
-symm_net.run_training(lam_vec = lamb_vec, dataloader = train_loader, nepochs = nepochs, seed = seed_train, lr = lr,apply_symm = True)
+symm_net.run_training(lam_vec = lamb_vec, dataloader = train_loader, nepochs = nepochs, seed = seed_train, lr = lr,apply_symm = apply_symm, apply_MSE = apply_MSE)
 
 
 anet =  top_analysis_trained()

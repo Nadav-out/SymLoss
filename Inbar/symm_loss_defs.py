@@ -52,6 +52,47 @@ devicef = (
 )
 print(f"Using {devicef} device")
 
+def boost_3d(data, device="cpu", beta=None, beta_max=0.95):
+
+    # sample beta from sphere
+    b1 = torch.tensor(np.random.uniform(0, 1, size=len(data)), dtype=torch.float32)
+    b2 = torch.tensor(np.random.uniform(0, 1, size=len(data)), dtype=torch.float32)
+    theta = 2 * np.pi * b1
+    phi = np.arccos(1 - 2 * b2)
+    
+    beta_x = np.sin(phi) * np.cos(theta)
+    beta_y = np.sin(phi) * np.sin(theta)
+    beta_z = np.cos(phi)
+    
+    beta = torch.cat([beta_x.unsqueeze(-1),beta_y.unsqueeze(-1), beta_z.unsqueeze(-1)], axis=1)
+    bf = torch.tensor(np.random.uniform(0, beta_max, size=(len(data),1)), dtype=torch.float32)
+    bf = bf#**(1/2)
+    beta = beta*bf#beta*beta_max
+    
+    beta_norm = torch.norm(beta, dim=1) 
+
+    # make sure we arent violating speed of light
+    #assert torch.all(beta_norm < 1)
+
+    gamma = 1 / torch.sqrt(1 - (beta_norm)**2)
+
+    beta_squared = (beta_norm)**2
+
+    # make boost matrix
+    L = torch.zeros((len(data), 4, 4)).to(device)
+    L[:,0, 0] = gamma
+    L[:,1:, 0] = L[:,0, 1:] = -gamma.unsqueeze(-1) * beta
+    L[:, 1:, 1:] = torch.eye(3) + (gamma[...,None, None] - 1) * torch.einsum('bi,bj->bij', (beta, beta))/ beta_squared[...,None, None]
+    
+    assert torch.all (torch.linalg.det(L)) == True
+
+    boosted_four_vector = torch.einsum('bij,bkj->bik', L.type(torch.float32), data.type(torch.float32)).permute(0, 2, 1) 
+
+    # Validate that energy values remain non-negative
+    assert torch.all(boosted_four_vector[:, :, 0] >= 0), "Negative energy values detected!"
+    
+    return boosted_four_vector
+
 
 def Lorentz_myfun(input):
         m2 = torch.einsum("... i, ij, ...j -> ...",input, torch.diag(torch.tensor([1.00,-1.00,-1.00,-1.00])), input)

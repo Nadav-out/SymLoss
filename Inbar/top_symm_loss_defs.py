@@ -22,6 +22,9 @@ import hdf5plugin
 from matplotlib.colors import LogNorm
 from sklearn.metrics import roc_curve, auc, accuracy_score
 
+import contextlib
+import warnings
+
 def SO3_gens():
     Lz = torch.tensor([[0,1,0],[-1,0,0],[0,0,0]],dtype = torch.float32)
     Ly = torch.tensor([[0,0,-1],[0,0,0],[1,0,0]],dtype = torch.float32)
@@ -65,6 +68,200 @@ print(f"Using {devicef} device")
 def shuffle_fun(a ,b ,c):
     idx = np.random.permutation(len(a))
     return a[idx], b[idx], c[idx]
+
+
+def to_cylindrical(four_vec, log=True):
+    E = four_vec[:,:,0]
+    px = four_vec[:,:,1]
+    py = four_vec[:,:,2]
+    pz = four_vec[:,:,3]
+    pt = torch.sqrt(px*px + py*py)
+    phi = torch.arctan2(py,px)
+    eta = torch.arcsinh(pz/pt)
+
+    if log:
+        cylindrical_four_vec = torch.cat([
+            torch.log(E.unsqueeze(-1)),
+            torch.log(pt.unsqueeze(-1)), 
+            eta.unsqueeze(-1),
+            phi.unsqueeze(-1)
+        ], axis=2)
+
+        cylindrical_four_vec = torch.where(cylindrical_four_vec < -1e30, 0, cylindrical_four_vec)
+    else:
+        cylindrical_four_vec = torch.cat([E.unsqueeze(-1),pt.unsqueeze(-1), eta.unsqueeze(-1),phi.unsqueeze(-1)], axis=2)
+
+    
+    return torch.nan_to_num(cylindrical_four_vec)
+
+
+
+def create_transformation_dict(cartesian_features):
+    # Converts Cartesian coordinates to cylindrical and returns a transformation dict
+    # cartesian_features shape [B, N, 4]
+    logE, logPt, eta, phi = to_cylindrical(cartesian_features, log=True).unbind(dim=2)
+    
+    # Intermediate quantities, shape [B, N]
+    sin_phi = torch.sin(phi) 
+    cos_phi = torch.cos(phi) 
+    sinh_eta = torch.sinh(eta)
+    cosh_eta = torch.cosh(eta)
+    lamb = torch.exp(logE - logPt)
+    zeros = torch.zeros_like(logE)
+    ones = torch.ones_like(logE)
+    
+    # Create and return the transformation dictionary
+    # Each key corresponds to a different coordinate
+    # Each value is a tensor of shape [B, N, 6]
+    trans_dict = {}
+    trans_dict['logE'] = torch.stack([zeros]*3 + [cos_phi/lamb, sin_phi/lamb, sinh_eta/lamb], dim=2)
+    trans_dict['logPt'] = torch.stack([sin_phi*sinh_eta, -cos_phi*sinh_eta, zeros, lamb*cos_phi, lamb*sin_phi, zeros], dim=2)
+    trans_dict['eta'] = torch.stack([-cosh_eta*sin_phi, cosh_eta*cos_phi, zeros, -lamb*cos_phi*sinh_eta/cosh_eta, -lamb*sin_phi*sinh_eta/cosh_eta, lamb/cosh_eta], dim=2)
+    trans_dict['phi'] = torch.stack([cos_phi*sinh_eta, sin_phi*sinh_eta, -ones, -lamb*sin_phi, lamb*cos_phi, zeros], dim=2)
+    return trans_dict
+
+
+def symm_loss_scalar7(model, X, X_cartesian, jet_vec, mask=None, train=False, generators=None, take_mean = False):
+    # generator should be a list of 6 boolian values, indicating which of the 6 Lorentz generators to use
+     # Check if generators is a list of boolean values
+    if generators is not None:
+        if not isinstance(generators, list) or len(generators) != 6 or not all(isinstance(g, bool) for g in generators):
+            warnings.warn("Invalid 'generators'. Expected a list of 6 boolean values. Continuing with 'generators=None'.")
+            generators = None
+    
+    device = X.device
+    
+    model = model.to(device) # Probably not necessary, I assume the model is already on the correct device
+    
+
+    # Create transformation dict for particles and jets
+    trans_dict = create_transformation_dict(X_cartesian)
+    trans_dict_jet = create_transformation_dict(jet_vec)
+    
+    # Prepare input
+    input = X.clone().detach().requires_grad_(True).to(device)
+    model.eval()
+    output = model(input, mask)  # [B]
+    
+    # Compute gradients
+    grads, = torch.autograd.grad(
+        outputs=output, 
+        inputs=input, 
+        grad_outputs=torch.ones_like(output, device=device), 
+        create_graph=train
+    )
+    
+    
+    with contextlib.nullcontext() if train else torch.no_grad():
+        # Build the variation tensor [B,6]
+        var_tensor = torch.einsum('b n, b n k -> b k',grads[:,:,0], (trans_dict['eta'] - trans_dict_jet['eta']))
+        var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,1], (trans_dict['phi'] - trans_dict_jet['phi']))
+        var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,2], (trans_dict['logPt'] - trans_dict_jet['logPt']))
+        var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,3], trans_dict['logPt'])
+        var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,4], (trans_dict['logE'] - trans_dict_jet['logE']))
+        var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,5], trans_dict['logE'])
+        
+        # delta R calculation (K_tensor)
+        K_tensor = (input[:,:,0].unsqueeze(-1) * (trans_dict['eta'] - trans_dict_jet['eta']))
+        K_tensor += (input[:,:,1].unsqueeze(-1) * (trans_dict['phi'] - trans_dict_jet['phi']))
+        K_tensor /= input[:,:,6].unsqueeze(-1)+1e-10 # Avoid division by zero
+        var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,6], K_tensor)
+
+
+        # Apply generators mask if provided
+        if generators is not None:
+            generators_tensor = torch.tensor(generators, dtype=torch.bool, device=device).unsqueeze(0)  # [1, 6]
+            var_tensor = torch.where(generators_tensor, var_tensor, torch.zeros_like(var_tensor))
+
+        
+        # Compute the loss
+        loss = torch.norm(var_tensor, p=2, dim=1)**2
+        
+        if take_mean:
+            loss = loss.mean()
+        return loss
+    
+    
+    
+    
+def symm_loss_scalar9(model, X, X_cartesian, mask=None, train=False, generators=None, take_mean = False, dict_vars = {"logE":0, "logPt":1, "eta":2, "phi":3, "log_R_E":4, "log_R_pt":5, "dEta":6, "dPhi":7, "dR":8}):
+    # generator should be a list of 6 boolian values, indicating which of the 6 Lorentz generators to use
+     # Check if generators is a list of boolean values
+    if generators is not None:
+        if not isinstance(generators, list) or len(generators) != 6 or not all(isinstance(g, bool) for g in generators):
+            warnings.warn("Invalid 'generators'. Expected a list of 6 boolean values. Continuing with 'generators=None'.")
+            generators = None
+    
+    device = X.device
+    
+    model = model.to(device) # Probably not necessary, I assume the model is already on the correct device
+    
+    
+    # Prepare input
+    input = X.clone().detach().requires_grad_(True).to(device)
+    model.eval()
+    output = model(input, mask)  # [B]
+    
+    jet_vec = torch.sum(X_cartesian, dim=1).unsqueeze(1)
+    
+    # Create transformation dict for particles and jets
+    trans_dict = create_transformation_dict(X_cartesian)
+    trans_dict_jet = create_transformation_dict(jet_vec)
+    
+    dici = trans_dict
+    dici["dEta"] = trans_dict_jet['eta'] - trans_dict['eta']
+    dici["dPhi"] = trans_dict_jet['phi'] - trans_dict['phi']
+    dici["log_R_pt"] = (trans_dict['logPt'] - trans_dict_jet['logPt'])
+    dici["log_R_E"] = (trans_dict['logE'] - trans_dict_jet['logE'])
+    K_tensor = (input[:,:,dict_vars["dEta"]].unsqueeze(-1) * (trans_dict['eta'] - trans_dict_jet['eta']))
+    K_tensor += (input[:,:,dict_vars["dPhi"]].unsqueeze(-1) * (trans_dict['phi'] - trans_dict_jet['phi']))
+    K_tensor /= input[:,:,dict_vars["dR"]].unsqueeze(-1)+1e-10 # Avoid division by zero
+    dici["dR"] = K_tensor
+        
+    
+    # Compute gradients
+    grads, = torch.autograd.grad(
+        outputs=output, 
+        inputs=input, 
+        grad_outputs=torch.ones_like(output, device=device), 
+        create_graph=train
+    )
+     
+    with contextlib.nullcontext() if train else torch.no_grad():
+        # Build the variation tensor [B,6]
+        init_key = "logE"
+        var_tensor = torch.einsum('b n, b n k -> b k', grads[:,:,dict_vars[init_key]], dici[init_key])
+        
+        for key in dict_vars.keys():
+            if key!=init_key:
+                var_tensor += torch.einsum('b n, b n k -> b k', grads[:,:,dict_vars[key]], dici[key])
+#             var_tensor = torch.einsum('b n, b n k -> b k',grads[:,:,0], (trans_dict['eta'] - trans_dict_jet['eta']))
+#             var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,1], (trans_dict['phi'] - trans_dict_jet['phi']))
+#             var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,2], (trans_dict['logPt'] - trans_dict_jet['logPt']))
+#             var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,3], trans_dict['logPt'])
+#             var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,4], (trans_dict['logE'] - trans_dict_jet['logE']))
+#             var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,5], trans_dict['logE'])
+
+#             # delta R calculation (K_tensor)
+#             K_tensor = (input[:,:,0].unsqueeze(-1) * (trans_dict['eta'] - trans_dict_jet['eta']))
+#             K_tensor += (input[:,:,1].unsqueeze(-1) * (trans_dict['phi'] - trans_dict_jet['phi']))
+#             K_tensor /= input[:,:,6].unsqueeze(-1)+1e-10 # Avoid division by zero
+#             var_tensor += torch.einsum('b n, b n k -> b k',grads[:,:,6], K_tensor)
+
+
+        # Apply generators mask if provided
+        if generators is not None:
+            generators_tensor = torch.tensor(generators, dtype=torch.bool, device=device).unsqueeze(0)  # [1, 6]
+            var_tensor = torch.where(generators_tensor, var_tensor, torch.zeros_like(var_tensor))
+
+        
+        # Compute the loss
+        loss = torch.norm(var_tensor, p=2, dim=1)**2
+        
+        if take_mean:
+            loss = loss.mean()
+        return loss
+
 
 
 class SymmLoss_pT_eta_phi(nn.Module):
@@ -257,29 +454,6 @@ class JetDataset(Dataset):
         else:
             return self.X[idx], self.y[idx], self.mask[idx]
         
-def to_cylindrical(four_vec, log=True):
-    E = four_vec[:,:,0]
-    px = four_vec[:,:,1]
-    py = four_vec[:,:,2]
-    pz = four_vec[:,:,3]
-    pt = torch.sqrt(px*px + py*py)
-    phi = torch.arctan2(py,px)
-    eta = torch.arcsinh(pz/pt)
-
-    if log:
-        cylindrical_four_vec = torch.cat([
-            torch.log(E.unsqueeze(-1)),
-            torch.log(pt.unsqueeze(-1)), 
-            eta.unsqueeze(-1),
-            phi.unsqueeze(-1)
-        ], axis=2)
-
-        cylindrical_four_vec = torch.where(cylindrical_four_vec < -1e30, 0.0, cylindrical_four_vec)
-    else:
-        cylindrical_four_vec = torch.cat([E.unsqueeze(-1),pt.unsqueeze(-1), eta.unsqueeze(-1),phi.unsqueeze(-1)], axis=2)
-
-    
-    return torch.nan_to_num(cylindrical_four_vec)
 
 def get_jet_relvars(four_vec, four_vec_cy):
     
@@ -310,7 +484,7 @@ def get_jet_relvars(four_vec, four_vec_cy):
     return jet_features
     
 
-def boost_3d(data, device="cpu", beta=None, beta_max=1.0):
+def boost_3d(data, device="cpu", beta=None, beta_max=0.95):
 
     # sample beta from sphere
     b1 = torch.tensor(np.random.uniform(0, 1, size=len(data)), dtype=torch.float32)
@@ -323,14 +497,14 @@ def boost_3d(data, device="cpu", beta=None, beta_max=1.0):
     beta_z = np.cos(phi)
     
     beta = torch.cat([beta_x.unsqueeze(-1),beta_y.unsqueeze(-1), beta_z.unsqueeze(-1)], axis=1)
-    # bf = torch.tensor(np.random.uniform(0, beta_max, size=(len(data),1)), dtype=torch.float32)
-    # bf = bf**(1/2)
-    beta = beta*beta_max
+    bf = torch.tensor(np.random.uniform(0, beta_max, size=(len(data),1)), dtype=torch.float32)
+    bf = bf#**(1/2)
+    beta = beta*bf#beta*beta_max
     
     beta_norm = torch.norm(beta, dim=1) 
 
     # make sure we arent violating speed of light
-    assert torch.all(beta_norm < 1)
+    #assert torch.all(beta_norm < 1)
 
     gamma = 1 / torch.sqrt(1 - (beta_norm)**2)
 
@@ -376,6 +550,10 @@ def boost(data, pdgid=None, device="cpu", beta=None):
     # return  torch.cat([four_vec, data[:,:,4:]], axis = 2)
     return four_vec
         
+    
+    
+    
+    
 class genNet(nn.Module):
     def __init__(self, input_size=4, output_size=1, hidden_size=10, n_hidden_layers=3, init="rand", equiv="False", rand = "True", freeze = "False",activation = "ReLU", skip = "False", seed = 98235):
         super().__init__()
@@ -598,17 +776,24 @@ class top_symm_net_train():
             self.hidden_size = hidden_size
             
         
-    def train_model(self,model, dataloader, criterion, optimizer, nepochs=15, device='cpu', apply_symm=False,lambda_symm = 1.0):
+    def train_model(self,model, dataloader, criterion, penalty,optimizer, nepochs=15, device='cpu', apply_symm=False,lambda_symm = 1.0, apply_MSE = False):
 
         model.to(device)
-        symmLoss = SymmLoss_pT_eta_phi(model, device=device)
+        #symmLoss = SymmLoss_pT_eta_phi(model, device=device)
         num_epochs = nepochs
         # save the losses
+        apply_symm = (apply_symm==True) or (apply_symm=="True")
+        apply_MSE = (apply_MSE==True) or (apply_MSE=="True")
+        
+        self.apply_MSE = apply_MSE
+        self.apply_symm = apply_symm
+        
         loss_tracker = {
             "Loss": [],
             "BCE": [],
             "Symm_Loss": [],
-            "beta": []
+            "beta": [],
+            "MSE_Loss": []
         }
         failed_jets = []
         print(lambda_symm)
@@ -617,28 +802,51 @@ class top_symm_net_train():
             running_loss = 0.0
             rbce = 0.0
             rsymm = 0.0
+            rmse = 0.0
 
             for batch_idx, batch in enumerate(tqdm(dataloader, desc=f"Epoch: {epoch}")):
                 optimizer.zero_grad()  # Zero the gradients
 
+                batch = [x.to(device) for x in batch]
+                
                 X, y, mask, X_cy = batch
-                X = X.to(device)
-                y = y.to(device)
-                X_cy = X_cy.to(device)
-                mask = mask.to(device)                
+                
+                # X = X.to(device)
+                # y = y.to(device)
+                # X_cy = X_cy.to(device)
+                # mask = mask.to(device)                
 
                 outputs = model(X_cy, mask)
                 bce = criterion(outputs.squeeze(), y)
-                symm = symmLoss(X_cy, mask=mask)
+                
+                X_boost = boost_3d(X, device)
+                X_boost_cy = to_cylindrical(X_boost)
+                boost_jet_vars = get_jet_relvars(X_boost, X_boost_cy)
+                X_boost_cy = torch.cat([X_boost_cy, boost_jet_vars], axis=2)
+
+                optimizer.zero_grad()  # Zero the gradients
+
+                outputs_boost = model(X_boost_cy, mask)
+
+                # catch NaNs
+                output_nan = torch.sum(torch.isnan(outputs_boost))
+
+                if output_nan > 0:
+                    print(f"Nan found in output in batch: {batch_idx}, Nans: {output_nan}")
+                    outputs_boost = torch.nan_to_num(outputs_boost, nan=0.5)
+
+                mse = penalty(outputs.squeeze(), outputs_boost.squeeze())
+                            
+                symm = symm_loss_scalar9(model, X_cy, X_cartesian = X, mask=mask,train = apply_symm,take_mean = True)#symmLoss(X_cy, mask=mask)
 
                 # print(symm)
 
-                # loss =  bce + mse
+                loss =  bce
                 if apply_symm:
-                    loss = bce + lambda_symm*symm
-                else:
-                    loss = bce 
-
+                    loss += lambda_symm*symm 
+                if apply_MSE:
+                    loss += mse 
+                
                 if torch.isinf(symm):
                     print("Found infinity")
 
@@ -651,6 +859,7 @@ class top_symm_net_train():
                 running_loss += loss.item()
                 rbce += bce.item()
                 rsymm += symm.item()
+                rmse += mse.item() 
                 # rbeta += beta.item()
                 # break
 
@@ -663,6 +872,7 @@ class top_symm_net_train():
             loss_tracker["Loss"].append(running_loss)
             loss_tracker["BCE"].append(rbce)
             loss_tracker["Symm_Loss"].append(rsymm)
+            loss_tracker["MSE_Loss"].append(rmse)
             # loss_tracker["beta"].append(rbeta)
             # break
             model_clone = copy.deepcopy(model)
@@ -671,11 +881,12 @@ class top_symm_net_train():
         return loss_tracker,model_clone
     
     
-    def run_training(self,lam_vec, dataloader, criterion = torch.nn.BCELoss(), opt = "Adam",lr = 5e-4, nepochs=15, device='cpu', apply_symm=False,set_seed = True,seed = int(torch.round(torch.rand(1)*10000))):
+    def run_training(self,lam_vec, dataloader, criterion = torch.nn.BCELoss(), penalty = torch.nn.MSELoss(),opt = "Adam",lr = 5e-4, nepochs=15, device='cpu', apply_symm=False, apply_MSE=False,set_seed = True,seed = int(torch.round(torch.rand(1)*10000))):
         
         self.lr = lr
         self.opt = opt
         self.apply_symm = apply_symm
+        self.apply_MSE = apply_MSE
         self.train_seed = seed
         
         if set_seed:
@@ -711,7 +922,7 @@ class top_symm_net_train():
                 optimizer = optim.Adam(model_train.parameters(), lr=lr)
 
 
-            train_output,model_trained = self.train_model(model = model_train, dataloader = train_loader_copy, criterion = criterion, optimizer = optimizer, device="cuda",apply_symm=apply_symm,lambda_symm = lam_val,nepochs=nepochs)
+            train_output,model_trained = self.train_model(model = model_train, dataloader = train_loader_copy, criterion = criterion, penalty = penalty ,optimizer = optimizer, device="cuda",apply_symm=apply_symm,apply_MSE=apply_MSE,lambda_symm = lam_val,nepochs=nepochs)
 
             models[lam_val] = copy.deepcopy(model_trained)
             train_outputs[lam_val] = copy.deepcopy(train_output)
@@ -735,7 +946,7 @@ class top_analysis_trained(top_symm_net_train):
         
     
     def title(self):
-        text = f"top_{self.ML_model}_"# hidden size:{self.hidden_size} layers:{self.n_hidden_layers} activation:{self.activation} lr:{self.lr} opt:{self.opt} "
+        text = f"top_{self.ML_model}_symm_{self.apply_symm}_MSE_{self.apply_MSE}"# hidden size:{self.hidden_size} layers:{self.n_hidden_layers} activation:{self.activation} lr:{self.lr} opt:{self.opt} "
         # self.spurions_for_print = ""
         # if self.broken_symm == "True" or self.broken_symm == True:
         #     text=f"{text} broken symm"
@@ -776,6 +987,9 @@ class top_analysis_trained(top_symm_net_train):
             losses = self.train_outputs[lam_val]
             plt.semilogy(range(len(losses["BCE"])),losses["BCE"],label = rf"$\lambda$ = {lam_val}, BCE", color = color_vec[i%len(color_vec)])
             plt.semilogy(range(len(losses["Symm_Loss"])),losses["Symm_Loss"],label = rf"$\lambda$ = {lam_val}, symm", color = color_vec[i%len(color_vec)],ls = "--")
+            if "MSE_Loss" in losses.keys():
+                plt.semilogy(range(len(losses["MSE_Loss"])),losses["MSE_Loss"],label = f"MSE", color = color_vec[i%len(color_vec)],ls = "-.")
+                
         plt.legend()
         plt.xlabel("epoch")
         plt.ylabel("loss")
@@ -791,9 +1005,10 @@ class top_analysis_trained(top_symm_net_train):
             plt.savefig(f"{outdir}/{filename}.pdf")
         
     def plot_losses_side(self,save = False, outdir = "./",filename = ""):
-
-        fig, ax = plt.subplots(1,3, figsize=(12,4))
-        for lam_val in train_outputs.keys():
+        nfigs = 4 if "MSE_Loss" in self.train_outputs[0.0].keys() else 3
+        
+        fig, ax = plt.subplots(1,nfigs, figsize=(12,4))
+        for lam_val in self.train_outputs.keys():
             losses = self.train_outputs[lam_val]
             # Total Loss
             lam = f"{lam_val:.1e}"
@@ -809,11 +1024,18 @@ class top_analysis_trained(top_symm_net_train):
             ax[1].set_xlabel("Epoch")
             ax[1].set_ylabel("BCE Loss")
 
-            # MSE Component
-            ax[2].plot(losses["Symm_Loss"])
+            # symm Component
+            ax[2].semilogy(losses["Symm_Loss"])
             #ax[2].plot(losses_symm["Symm_Loss"])
             ax[2].set_xlabel("Epoch")
             ax[2].set_ylabel("Symm Loss")
+            
+            # MSE Component
+            if "MSE_Loss" in losses.keys():
+                ax[3].plot(losses["MSE_Loss"])
+                #ax[3].plot(losses_symm["Symm_Loss"])
+                ax[3].set_xlabel("Epoch")
+                ax[3].set_ylabel("MSE Loss")
 
         fig.tight_layout()
         if save==True or save=="True":
@@ -871,13 +1093,15 @@ class top_analysis_trained(top_symm_net_train):
             plt.savefig(f"{outdir}/{filename}.pdf")
 
             
-    def evaluate_model(self,model, dataloader, device='cpu', max_betas = [1.0]):
+    def evaluate_model(self,model, dataloader, device='cpu', beta_max = [1.0]):
         model.to(device)
         model.eval()  # Set the model to evaluation mode
-
+        
         pred = []
         true = []
         boost_ = {mb: [] for mb in beta_max} 
+        pt = []
+        pt_boost = {mb: [] for mb in beta_max}
         with torch.no_grad():  # Disable gradient calculation
             for idx, batch in enumerate(dataloader):
                 X, y, mask, X_cy = batch
@@ -889,23 +1113,27 @@ class top_analysis_trained(top_symm_net_train):
                 outputs = model(X_cy, mask)  # Forward pass
                 pred.append(outputs)
                 true.append(y)
+                jet_cy = to_cylindrical(torch.sum(X, dim=1).unsqueeze(1))
+                pt.append(jet_cy[:,:,1])
 
                 for mb in beta_max:
                     if idx ==0:
                         print(f"Max beta: {np.sqrt(mb)}")
                     X_boost = boost_3d(X, device=device, beta_max=mb)
+                    jet_cy = to_cylindrical(torch.sum(X_boost, dim=1).unsqueeze(1))
                     X_boost_cy = to_cylindrical(X_boost)
                     jet_vars = get_jet_relvars(X_boost, X_boost_cy)
                     X_boost_cy = torch.cat([X_boost_cy,jet_vars], axis=2)                         
-
+                    
                     outputs_boost = model(X_boost_cy, mask)
                     boost_[mb].append(outputs_boost)
+                    pt_boost[mb].append(jet_cy[:,:,1])
 
         model.to("cpu")
         for mb in beta_max:
             boost_[mb] = torch.cat(boost_[mb])
 
-        return torch.cat(pred), boost_, torch.cat(true)
+        return torch.cat(pred), boost_, torch.cat(true), torch.cat(pt), pt_boost
     
     
     
@@ -955,19 +1183,27 @@ class top_analysis_trained(top_symm_net_train):
                 
     
         
-    def evaluate_models(self):
+    def evaluate_models(self,test_loader):
         
         pred = {}
         boost = {}
         true = {}
+        pt = {}
+        boost_pt = {}
         models = self.models
         
+        seed = self.data_seed
+        
         for lam_val in models.keys():
-            pred[lam_val], boost[lam_val], true[lam_val] = self.evaluate_model(model = models[lam_val], dataloader = test_loader, device="cuda")
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            pred[lam_val], boost[lam_val], true[lam_val], pt[lam_val], boost_pt[lam_val] = self.evaluate_model(model = models[lam_val], dataloader = copy.deepcopy(test_loader), device="cuda")
             
         self.pred = pred
         self.boost = boost
         self.true = true
+        self.pt = pt
+        self.pt_boost = boost_pt
         
     def print_AUC(self,beta_max = 0.8):
         

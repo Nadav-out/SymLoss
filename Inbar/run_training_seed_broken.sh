@@ -1,12 +1,14 @@
 #!/bin/bash
 #SBATCH -C gpu
-#SBATCH --ntasks-per-node=4
+#SBATCH -N 1
+#SBATCH -q regular
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
 #SBATCH --gpus-per-node=1
 #SBATCH --gpus-per-task=1
-#SBATCH --time 02:00:00
+#SBATCH --time 140
 #SBATCH --account m3246
-#SBATCH -J train-pm
+#SBATCH -J old-2621-6127
 #SBATCH -o logs/%x-%j.out
 
 # Setup software
@@ -19,8 +21,8 @@ trainer=/global/homes/i/inbarsav/SymLoss/Inbar/train_regress_NN_broken.py
 json=/global/homes/i/inbarsav/SymLoss/Inbar/config_run_broken_0.json
 saveplots="True"
 savenet="True"
-seeddata="rand"
-seedtrain="rand"
+seeddata="2621"
+seedtrain="6127"
 # Run the training
 #srun -l -u --rank-gpu --ranks-per-node=${SLURM_NTASKS_PER_NODE} $@
 python3 $trainer --jsonfile $json --saveplots $saveplots --savenet $savenet --outdir $outdir --plotsoutdir $plotsoutdir --seeddata $seeddata --seedtrain $seedtrain
