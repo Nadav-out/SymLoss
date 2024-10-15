@@ -21,7 +21,7 @@
     "input_spurions":"False",
     "apply_symm": "True",
     "apply_MSE" : "False",
-    "ML_model":"NN",
+    "ML_model":"NNfixed",
     "rho_size":256,
     "phi_size":128,
     "input_dim":9,

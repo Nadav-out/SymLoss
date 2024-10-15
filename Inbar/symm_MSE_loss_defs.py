@@ -516,7 +516,7 @@ class symm_net_train():
             self.hidden_size = hidden_size
             self.n_hidden_layers = n_hidden_layers
         
-    def train_model(self,model, dataloader, criterion, penalty,optimizer, nepochs=15, device='cpu', apply_symm=False,lambda_symm = 1.0, apply_MSE = False, clip_grads = False):
+    def train_model(self,model, dataloader, criterion, penalty,optimizer, nepochs=15, device='cpu', apply_symm=False,lambda_symm = 1.0, apply_MSE = False, clip_grads = False, beta_max = 0.95):
 
         model.to(device)
         #symmLoss = SymmLoss_pT_eta_phi(model, device=device)
@@ -527,6 +527,7 @@ class symm_net_train():
         
         self.apply_MSE = apply_MSE
         self.apply_symm = apply_symm
+        self.beta_max = beta_max
         
         loss_tracker = {
             "Loss": [],
@@ -559,7 +560,7 @@ class symm_net_train():
                 outputs = model(X)
                 bce = criterion(outputs.squeeze(), y)
                 
-                X_boost = boost_3d(X, device)
+                X_boost = boost_3d(X, device, beta_max = beta_max)
                 
                 optimizer.zero_grad()  # Zero the gradients
 
@@ -582,7 +583,7 @@ class symm_net_train():
 
                 # print(symm)
 
-                loss =  bce
+                loss = 1.0*bce
                 if apply_symm:
                     loss += lambda_symm*symm 
                 if apply_MSE:
@@ -609,6 +610,7 @@ class symm_net_train():
             running_loss /=len(dataloader)
             rbce /= len(dataloader)
             rsymm /= len(dataloader)
+            rmse /= len(dataloader)
             # rbeta /= len(dataloader)
             if (epoch % 100 == 0) or (epoch == nepochs-1):
                 print(f'lambda = {lambda_symm} Epoch [{epoch+1}/{num_epochs}] Loss: {running_loss:.4f}, task: {rbce:.4f}, dSymm: {rsymm}, GSymm:{rmse}')
@@ -623,7 +625,7 @@ class symm_net_train():
 
         return loss_tracker,model_clone
     
-    def run_training(self,lam_vec, dataloader, criterion = torch.nn.MSELoss(), penalty = torch.nn.MSELoss(),opt = "Adam",lr = 5e-4, nepochs=15, device='cpu', apply_symm=False, apply_MSE=False,set_seed = True,seed = int(torch.round(torch.rand(1)*10000)),clip_grads = False):
+    def run_training(self,lam_vec, dataloader, criterion = torch.nn.MSELoss(), penalty = torch.nn.MSELoss(),opt = "Adam",lr = 5e-4, nepochs=15, device='cpu', apply_symm=False, apply_MSE=False,set_seed = True,seed = int(torch.round(torch.rand(1)*10000)),clip_grads = False, beta_max = 0.95):
         
         self.lr = lr
         self.opt = opt
@@ -669,7 +671,7 @@ class symm_net_train():
                 optimizer = optim.Adam(model_train.parameters(), lr=lr)
 
 
-            train_output,model_trained = self.train_model(model = model_train, dataloader = train_loader_copy, criterion = criterion, penalty = penalty ,optimizer = optimizer, device="cuda",apply_symm=apply_symm,apply_MSE=apply_MSE,lambda_symm = lam_val,nepochs=nepochs,clip_grads = clip_grads)
+            train_output,model_trained = self.train_model(model = model_train, dataloader = train_loader_copy, criterion = criterion, penalty = penalty ,optimizer = optimizer, device="cuda",apply_symm=apply_symm,apply_MSE=apply_MSE,lambda_symm = lam_val,nepochs=nepochs,clip_grads = clip_grads, beta_max = beta_max)
 
             models[lam_val] = copy.deepcopy(model_trained)
             train_outputs[lam_val] = copy.deepcopy(train_output)
@@ -904,6 +906,8 @@ class analysis_trained(symm_net_train):
         text = text+f" N:{self.N} lr:{self.lr} "
         if hasattr(self,"clip_grads"):
             text = text+ f" clip_grads_{self.clip_grads}"
+        if hasattr(self,"beta_max") and self.apply_MSE:
+            text = text+ f" beta_max_{self.beta_max}"
         
        
         self.filename = text.replace("[","").replace("]","").replace(",","_").replace(":","_").replace(" ","_")+f"_data_seed_{self.dataset_seed}_train_seed_{self.train_seed}"

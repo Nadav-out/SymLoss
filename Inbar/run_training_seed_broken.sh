@@ -21,8 +21,8 @@ trainer=/global/homes/i/inbarsav/SymLoss/Inbar/train_regress_NN_broken.py
 json=/global/homes/i/inbarsav/SymLoss/Inbar/config_run_broken_0.json
 saveplots="True"
 savenet="True"
-seeddata="2621"
-seedtrain="6127"
+seeddata="rand"
+seedtrain="rand"
 # Run the training
 #srun -l -u --rank-gpu --ranks-per-node=${SLURM_NTASKS_PER_NODE} $@
 python3 $trainer --jsonfile $json --saveplots $saveplots --savenet $savenet --outdir $outdir --plotsoutdir $plotsoutdir --seeddata $seeddata --seedtrain $seedtrain

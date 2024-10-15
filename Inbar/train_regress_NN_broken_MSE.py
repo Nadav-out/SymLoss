@@ -83,6 +83,9 @@ apply_symm = config["apply_symm"]
 clip_grads = config["clip_grads"]
 clip_grads  = (clip_grads== "True" or clip_grads== True)
 
+beta_max = (config["beta_max"] if "beta_max" in config.keys() else 0.95)
+print(f"beta max  = {beta_max}")
+
 apply_both_seq = ((apply_MSE == "True" or apply_MSE ==True) and (apply_symm == "True" or apply_symm ==True) )
 
 apply_symm_vec = ([True, False]) if apply_both_seq else [apply_symm]
@@ -111,7 +114,7 @@ for run, apply_symm in enumerate(apply_symm_vec):
     symm_net.set_model(ML_model = ML_model, init = config["init"],equiv=config["equiv"],rand=config["rand"], freeze =config["freeze"],skip = config["skip"],hidden_size =config["hidden_size"], n_hidden_layers = config["n_hidden_layers"],activation = config["activation"],input_dim = input_dim,rho_size =rho_size, phi_size = phi_size)
 
 
-    symm_net.run_training(dataloader = train_loader,nepochs = config["nepochs"],lam_vec = config["lam_vec"],seed = seed_train, lr = config["lr"],apply_symm = apply_symm, apply_MSE = apply_MSE, clip_grads = clip_grads)
+    symm_net.run_training(dataloader = train_loader,nepochs = config["nepochs"],lam_vec = config["lam_vec"],seed = seed_train, lr = config["lr"],apply_symm = apply_symm, apply_MSE = apply_MSE, clip_grads = clip_grads, beta_max = beta_max)
 
 
     anet =  analysis_trained()
