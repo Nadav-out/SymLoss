@@ -983,7 +983,7 @@ def main():
     files =[]
     beta_dir = torch.tensor([0.0,0.0,1.0])
     lams = [0.0,0.1,1.0,10.0,100.0]
-    err_mean = {mod:{} for mod in models}
+    err_mean ={ beta:{mod:{} for mod in models} for beta in beta_max_vec}
     outdir = "./plots"
     save = True
     filename_both = "toy_z_symm_MSE_new"
@@ -1005,9 +1005,11 @@ def main():
                 files = get_files(storage_dir=storage_dir,Nepochs = Nepochs,apply_symm = apply_symm,apply_MSE = apply_MSE,broken = broken,spurion_mag = mag,beta_max=beta_max)
                 if files!=[]:
                     filename = f"{model}_{spur_name}_beta_max_{beta_max}" if model=="Gsymm" else f"{model}_{spur_name}"
-                    err_mean[model][beta_max],_ = performance_plot_all(files,beta_dir = beta_dir,outdir = outdir,filename = filename,lams = lams, save = True,test_data = "rand",seed = "rand",beta_max = beta_max)
-            print(f"plotted spurion mag = {mag} beta max = {beta_max}")
-        performance_plot_symm_MSE(err_mean, filename = f"{filename}",lams = [0.0,0.1,1.0,10.0,100.0], save = True)
+                    err_mean[beta_max][model],_ = performance_plot_all(files,beta_dir = beta_dir,outdir = outdir,filename = filename,lams = lams, save = True,test_data = "rand",seed = "rand",beta_max = beta_max)
+        print(f"plotted spurion mag = {mag} beta max = {beta_max}")
+        for beta_max in beta_max_vec:
+            filename = f"dsymm_Gsymm_{spur_name}_beta_max_{beta_max}"
+            performance_plot_symm_MSE({"Gsymm": err_mean[beta_max]["Gsymm"],"dsymm":err_mean[0.95]["dsymm"]}, filename = f"{filename}",lams = [0.0,0.1,1.0,10.0,100.0], save = True)
 
                 
     return 
