@@ -1,2 +1,15 @@
-data/*
+*data/*
 notebooks/unrelated.ipynb
+*.out
+*storage/*
+*checkpoint*
+logs/*
+*.pyc
+*.h5
+/Inbar/storage/*
+/Inbar/data/*
+/Inbar/logs/*
+/Inbar/checkpoint*
+/Inbar/*.out
+/Inbar/.ipynb_checkpoints/*
+/Inbar/*.pyc
