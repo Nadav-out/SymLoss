@@ -7,6 +7,7 @@ import einops
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.lines as lines
 import copy
 import pickle
 import os
@@ -15,9 +16,34 @@ from symm_MSE_loss_defs import *
 #from top_symm_loss_defs import *
 from decimal import Decimal
 import glob
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
 
-
+###### defs ########
 storage_dir="/pscratch/sd/i/inbarsav/SymmLoss/storage"
+# color_vec = ["deepskyblue","blue","blueviolet","violet","magenta","deeppink","pink"]
+cmap = cm.get_cmap('cool')
+lambdas = [0.0,0.1,1.0,10.0,100.0]
+vmin=0
+vmax=len(lambdas)
+norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+scalar_map = cm.ScalarMappable(norm=norm, cmap=cmap)
+colors_dict = {0.0: 'gray'}
+colors_dict.update({lambdas[i]: scalar_map.to_rgba(i) for i in np.arange(len(lambdas))})
+colors_dict.update({0.0: 'lightgray'})
+color_vec = ["black","blue","magenta","pink"]
+
+def set_plot_params(fontsize = 14,lable_size_major = 14,lable_size_minor = 12,legend_size = 14,font_family="serif"):
+    plt.rcParams.update({'font.size': fontsize})
+    plt.rcParams.update({'axes.labelsize': fontsize})
+    plt.rcParams.update({'axes.titlesize': fontsize})
+    plt.rcParams.update({'xtick.labelsize': lable_size_major})
+    plt.rcParams.update({'ytick.labelsize': lable_size_major})
+    plt.rcParams.update({'legend.fontsize': legend_size})
+    plt.rcParams.update({'font.family': font_family})
+    # plt.rcParams.update({'axes.labelweight': 'bold'})
+
+  
 
 def Lorentz_myfun(input):
         m2 = torch.einsum("... i, ij, ...j -> ...",input, torch.diag(torch.tensor([1.00,-1.00,-1.00,-1.00])).to(devicef), input)
@@ -162,7 +188,7 @@ def performance_plot_ext(analysis,beta_range = torch.linspace(0,1,100),beta_dir 
     plt.clf()
     fig = plt.figure()
     err = {}
-    color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
+    # color_vec = ["deepskyblue","blue","blueviolet","violet","magenta","deeppink","pink"]
     model_data_trans = []
     truth_new = []
 
@@ -214,7 +240,7 @@ def performance_plot_ext(analysis,beta_range = torch.linspace(0,1,100),beta_dir 
 
                 
 #       
-        plt.semilogy(beta_range, err[lam_val],label = label, color = color_vec[i])
+        plt.semilogy(beta_range, err[lam_val],label = label, color = colors_dict[lam_val])
         
     plt.legend()
     plt.annotate(rf"$\hat\beta = {beta_dir}$",xy=(0.05,0.35),xycoords = "axes fraction")
@@ -222,7 +248,7 @@ def performance_plot_ext(analysis,beta_range = torch.linspace(0,1,100),beta_dir 
     if relative:
         plt.ylabel("relative MSE")
     else:
-        plt.ylabel("MSE")
+        plt.ylabel("Mean Squared Error")
     text = analysis.title()
     plt.title(text)
         
@@ -282,7 +308,7 @@ def performance_plot_ext_theta(analysis,theta_range = torch.linspace(0,2*np.pi,1
     plt.clf()
     fig = plt.figure()
     err = {}
-    color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
+    # color_vec = ["deepskyblue","blue","blueviolet","violet","magenta","deeppink","pink"]
     model_data_trans = []
     truth_new = []
 
@@ -360,7 +386,7 @@ def performance_plot_ext_theta(analysis,theta_range = torch.linspace(0,2*np.pi,1
     if relative:
         plt.ylabel("relative MSE")
     else:
-        plt.ylabel("MSE")
+        plt.ylabel("Mean Squared Error")
     text = analysis.title()
     plt.title(text)
         
@@ -453,7 +479,7 @@ def rot(data,theta,theta_dir = torch.tensor([0,0,1])):
 def performance_calc_ext(analysis,beta_range = torch.linspace(0,1,100),beta_dir = torch.tensor([1.0,0.0,0.0]),theta_range = torch.linspace(0,2*np.pi,100),theta_dir =torch.tensor([0.0,0.0,1.0]),model = "last",transformed_spurions = "True",save = False, outdir = "./plots",filename = "",relative = False,test_data = "train",N = 10000,norm = 1,dinput = 4, seed = 29487):
     err = {}
     err_analysis = []
-    color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
+    # color_vec = ["deepskyblue","blue","blueviolet","violet","magenta","deeppink","pink"]
 
     ######### initialize #################   
     trans_new_data = torch.zeros(len(beta_range))
@@ -556,14 +582,17 @@ def performance_calc_ext(analysis,beta_range = torch.linspace(0,1,100),beta_dir 
 
 
 def performance_plot_ext_many_clean(errs,lams,beta_range, title = "",save = True, outdir = "./plots",filename = ""):
-    color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
+    # color_vec = ["deepskyblue","blue","blueviolet","violet","magenta","deeppink","pink"]
 
     #plt.clf()
     fig = plt.figure()
+    set_plot_params()
     err_mean = {}
     for i,lam_val in enumerate(lams):
         # err_mean[lam_val] = torch.zeros_like(beta_range)
-        label = rf"$\lambda$ = {'{:.1e}'.format(lam_val)}"
+        lam_val_label = lam_val if float(lam_val)<1.0 else round(lam_val)
+        label = r"$\lambda$ ="+f" {lam_val_label}" if lam_val!=0 else "Baseline"
+        # label = rf"$\lambda$ = {'{:.1e}'.format(lam_val)}"
         #print(label)
         #print(errs)
         if any(lam_val in err.keys() for err in errs):
@@ -574,17 +603,18 @@ def performance_plot_ext_many_clean(errs,lams,beta_range, title = "",save = True
         #     #print(err_mean)
         # err_mean[lam_val] = (1/len(errs))*err_mean[lam_val]
             err_mean[lam_val] = err_vec.mean(dim = 0)
-            plt.semilogy(beta_range, err_mean[lam_val],label = label, color = color_vec[i])
+            plt.semilogy(beta_range, err_mean[lam_val],label = label, color = colors_dict[lam_val])
 
     plt.legend()
     #plt.annotate(rf"$\hat\beta = {beta_dir}$",xy=(0.05,0.35),xycoords = "axes fraction")
     plt.xlabel(r"$\beta$")
-    plt.ylabel("MSE")
+    plt.ylabel("Mean Squared Error")
     plt.ylim([1e-7,1e2])
     
     text = title
+
     plt.title(text)
-        
+    set_plot_params()
     # if analysis.print_spurions == "True" or analysis.print_spurions == True:
     #plt.annotate(analysis.spurions_for_print,xy=(0.05,0.4),xycoords = "axes fraction")
            
@@ -607,7 +637,7 @@ def performance_plot_ext_many_clean(errs,lams,beta_range, title = "",save = True
 
 def performance_plot_all(files,beta_range = torch.linspace(0,1,100),beta_dir = torch.tensor([1.0,0.0,0.0]),theta_range = torch.linspace(0,2*np.pi,100),theta_dir =torch.tensor([0.0,0.0,1.0]),model = "last",transformed_spurions = "False",save = True, outdir = "./plots",filename = "",relative = False, lams = [0.0], N=10000,norm=1,dinput=4,seed = "rand", test_data = "train",beta_max = 0.95 ):
     errs = []
-    color_vec = ["violet","blue","green","orange","red","pink","purple","teal","magenta"]
+    # color_vec = ["deepskyblue","blue","blueviolet","violet","magenta","deeppink","pink"]
     count = 0
     if seed.isnumeric():
         seed_data = int(seed_data)
@@ -632,19 +662,20 @@ def performance_plot_all(files,beta_range = torch.linspace(0,1,100),beta_dir = t
 
 def performance_plot_symm_MSE(err_mean,beta_range = torch.linspace(0,1,100),beta_dir = torch.tensor([1.0,0.0,0.0]),theta_range = torch.linspace(0,2*np.pi,100),theta_dir =torch.tensor([0.0,0.0,1.0]),save = True, outdir = "./plots", title = "",filename = "",lams = [0.0], N=10000,norm=1,dinput=4,seed = "rand", test_data = "train" ):
     errs = []
-    color_vec = ["violet","blue","green","orange","red","pink","purple","teal","magenta"]
+    # color_vec = ["deepskyblue","blue","blueviolet","violet","magenta","deeppink","pink"]
     
  
     plt.clf()
     fig = plt.figure()
     err_mean = err_mean.copy()
     for i,lam_val in enumerate(lams):
-        label = rf"$\lambda$ = {lam_val}"
+        lam_val_label = lam_val if float(lam_val)<1.0 else round(lam_val)
+        label = r"$\lambda$ ="+f" {lam_val_label}" if lam_val!=0 else "Baseline"
         #print(label)
         #plt.semilogy(beta_range, err_mean['symm'][lam_val],label = r"$\lambda_{dSymm}$ ="+f" {lam_val}", color = color_vec[i])
         #plt.semilogy(beta_range, err_mean['MSE'][lam_val],label = r"$\lambda_{GSymm}$ ="+f" {lam_val}", color = color_vec[i],ls = "--")
-        plt.semilogy(beta_range, err_mean['dsymm'][lam_val],label = r"$\lambda_{Symm}$ ="+f" {lam_val}", color = color_vec[i])
-        plt.semilogy(beta_range, err_mean['Gsymm'][lam_val], color = color_vec[i],ls = "--")
+        plt.semilogy(beta_range, err_mean['dsymm'][lam_val],label = label, color = colors_dict[lam_val])
+        plt.semilogy(beta_range, err_mean['Gsymm'][lam_val], color = colors_dict[lam_val],ls = "--")
 
 
 
@@ -652,8 +683,8 @@ def performance_plot_symm_MSE(err_mean,beta_range = torch.linspace(0,1,100),beta
     #legend with solid - symm, dashed - MSE
     # Create custom legend handles for solid and dashed black lines
     custom_handles = [
-        Line2D([0], [0], color='black', linestyle='-', label='dSymm'),
-        Line2D([0], [0], color='black', linestyle='--', label='GSymm')
+        lines.Line2D([0], [0], color='black', linestyle='-', label=r'$\delta$SEAL'),
+        lines.Line2D([0], [0], color='black', linestyle='--', label='GSEAL')
     ]
 
     # Get the automatic legend handles and labels
@@ -669,12 +700,12 @@ def performance_plot_symm_MSE(err_mean,beta_range = torch.linspace(0,1,100),beta
 
     #plt.annotate(rf"$\hat\beta = {beta_dir}$",xy=(0.05,0.35),xycoords = "axes fraction")
     plt.xlabel(r"$\beta$")
-    plt.ylabel("MSE")
+    plt.ylabel("Mean Squared Error")
     plt.ylim([1e-7,1e2])
 
     text = title
     plt.title(text)
-
+    set_plot_params()
     # if analysis.print_spurions == "True" or analysis.print_spurions == True:
     #plt.annotate(analysis.spurions_for_print,xy=(0.05,0.4),xycoords = "axes fraction")
 
@@ -697,7 +728,7 @@ def performance_plot_symm_MSE(err_mean,beta_range = torch.linspace(0,1,100),beta
 def performance_calc_lambda(analysis, model = "last",transformed_spurions = "True",save = False, outdir = "./plots",filename = "",relative = False,test_data = "train",N = 10000,norm = 1,dinput = 4, seed = 29487,beta_max = 0.95):
     err = {}
     err_analysis = []
-    color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
+    # color_vec = ["deepskyblue","blue","blueviolet","violet","magenta","deeppink","pink"]
 
     ######### initialize #################   
    
@@ -808,7 +839,7 @@ def performance_calc_lambda(analysis, model = "last",transformed_spurions = "Tru
 
 
 def performance_plot_lambda_many_clean(errs,lams = "all", title = "",save = True, outdir = "./plots",filename = "",lin_logx = "lin",lin_logy = "log", apply_symm = True, apply_MSE = True, err=True, symm=True, MSE = True, beta_max = ""):
-    color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
+    # color_vec = ["deepskyblue","blue","blueviolet","violet","magenta","deeppink","pink"]
 
     # plt.clf()
     fig = plt.figure()
@@ -869,14 +900,14 @@ def performance_plot_lambda_many_clean(errs,lams = "all", title = "",save = True
             plt.errorbar(lam_vals, [symm_mean[lam] for lam in lam_vals],[symm_std[lam] for lam in lam_vals],label = "dSymm", color = "pink")
         if MSE:
             lam_vals = [lam for lam in lams if not(torch.isnan(symm_mean[lam]))]
-            MSE_label = "GSymm" if beta_max=="" else "GSymm "+r"$\beta_{max}$="+f"{beta_max}"
+            MSE_label = "GSEAL" if beta_max=="" else "GSEAL "+r"$\beta_{max}$="+f"{beta_max}"
             plt.errorbar(lam_vals, [mse_mean[lam] for lam in lam_vals],[mse_std[lam] for lam in lam_vals] ,label = MSE_label, color = "blue")
 
         plt.xlabel(r"$\lambda$")
         if apply_symm == True:
-            plt.xlabel(r"$\lambda_{dSymm}$")
+            plt.xlabel(r"$\lambda_{\delta SEAL}$")
         elif apply_MSE == True:
-            plt.xlabel(r"$\lambda_{GSymm}$")
+            plt.xlabel(r"$\lambda_{GSEAL}$")
 
         plt.ylabel("Loss")
         # plt.ylim([1e-7,1e2])
@@ -916,7 +947,7 @@ def performance_plot_lambda_all(files,model = "last",transformed_spurions = "Fal
                  
     count_symm = 0
     count_MSE = 0
-    color_vec = ["violet","blue","green","yellow","orange","red","pink","purple","teal","magenta"]
+    # color_vec = ["deepskyblue","blue","blueviolet","violet","magenta","deeppink","pink"]
     if seed.isnumeric():
         seed_data = int(seed_data)
     else:
@@ -956,35 +987,45 @@ def performance_plot_lambda_all(files,model = "last",transformed_spurions = "Fal
     return metrics_mean,metrics
 
 
-def get_files(storage_dir=None,Nepochs = 999,apply_symm = [True],apply_MSE = [True],beta_max = [0.95],broken = False,spurion_mag = 0.0):
+def get_files(storage_dir=None,Nepochs = 999,apply_symm = True,apply_MSE = True,beta_max = 0.95,broken = False,spurion_mag = 0.0):
     if storage_dir is None:
         storage_dir = storage_dir
-    files = glob.glob(f"{storage_dir}/*toy*broken_symm*")
+    files = glob.glob(f"{storage_dir}/*toy*symm_*MSE_*broken_symm_spurion*{spurion_mag}]*")
     files_filtered =[]
     for file in files:
         with open(file,"rb") as f:
             a = pickle.load(f)
-            if (Nepochs >= 999) and (hasattr(a,"clip_grads")) and (any(a.apply_symm == apply_symm) or any(a.apply_MSE == apply_MSE) or ((a.apply_MSE==False) and (a.apply_symm==False))):
-                if any(a.beta_max == beta_max) and (a.broken_symm == broken):
-                    if broken and (a.spurion_mag == spurion_mag):
-                        files_filtered.append(file)
+            #print a attributes
+            # print(f"file = {file}")
+            nepochs = len(a.train_outputs[0.0]['Loss'])
+            if (nepochs >= 999) and (hasattr(a,"clip_grads")) and ((a.apply_symm == apply_symm or apply_MSE == a.apply_MSE) or ((a.apply_MSE==False) and (a.apply_symm==False))):
+                # print(f"file = {file} has Nepochs = {nepochs}, apply_symm = {a.apply_symm} and apply_MSE = {a.apply_MSE}")
+                if (not (hasattr(a,"beta_max"))):
+                    a.beta_max = 0.95
+                if (a.beta_max == beta_max) and (a.broken_symm == broken or a.broken_symm == f"{broken}"):
+                    # print(f"file = {file} has broken = {a.broken_symm} and beta_max = {a.beta_max}=={beta_max}")
+                    # if (broken and (a.spurion_mag == spurion_mag)) or (not broken):
+                    files_filtered.append(file)
+                    # print(f"file = {file}")
+            # print(files_filtered)
     return files_filtered
 
 
 def main():
-    storage_dir = "./storage"
+    storage_dir_nersc="/pscratch/sd/i/inbarsav/SymmLoss/storage"
     Nepochs = 999
     models = ["dsymm","Gsymm"]
     apply_symm = [True,False]
     apply_MSE = [True,False]
     broken = True
     spurion_mag = [0.0,0.001]
-    beta_max_vec = [0.001,0.1,0.5,0.95]
+    beta_max_vec = [0.1,0.5,0.95]#[0.001,0.1,0.5,0.95]#[0.95]
     files =[]
     beta_dir = torch.tensor([0.0,0.0,1.0])
-    lams = [0.0,0.1,1.0,10.0,100.0]
+    # lams = [0.0,0.1,1.0,10.0,100.0]
+    lams = [0.0,0.1,1.0,10.0,100.0] #[0.0,0.1,100]
     err_mean ={ beta:{mod:{} for mod in models} for beta in beta_max_vec}
-    outdir = "./plots"
+    outdir = "./results/toys"
     save = True
     filename_both = "toy_z_symm_MSE_new"
     for mag in spurion_mag:
@@ -1002,14 +1043,17 @@ def main():
         
             for beta_max in beta_maxs:
                 files =[]
-                files = get_files(storage_dir=storage_dir,Nepochs = Nepochs,apply_symm = apply_symm,apply_MSE = apply_MSE,broken = broken,spurion_mag = mag,beta_max=beta_max)
+                print(f"searching files with Nepochs = {Nepochs}, apply_symm = {apply_symm}, apply_MSE = {apply_MSE}, broken = {broken}, spurion_mag = {mag}, beta_max = {beta_max}")
+                files = get_files(storage_dir=storage_dir_nersc,Nepochs = Nepochs,apply_symm = apply_symm,apply_MSE = apply_MSE,broken = broken,spurion_mag = mag,beta_max=beta_max)
+                # print(files)
                 if files!=[]:
-                    filename = f"{model}_{spur_name}_beta_max_{beta_max}" if model=="Gsymm" else f"{model}_{spur_name}"
-                    err_mean[beta_max][model],_ = performance_plot_all(files,beta_dir = beta_dir,outdir = outdir,filename = filename,lams = lams, save = True,test_data = "rand",seed = "rand",beta_max = beta_max)
-        print(f"plotted spurion mag = {mag} beta max = {beta_max}")
+                    filename = f"toys_{model}_{spur_name}_beta_max_{beta_max}" if model=="Gsymm" else f"{model}_{spur_name}"
+                    err_mean[beta_max][model],_ = performance_plot_all(files,beta_dir = beta_dir,outdir = outdir,filename = f"{filename}_clean_4",lams = lams, save = True,test_data = "rand",seed = "rand",beta_max = beta_max)
+                    print(f"plotted spurion mag = {mag} beta max = {beta_max}")
         for beta_max in beta_max_vec:
             filename = f"dsymm_Gsymm_{spur_name}_beta_max_{beta_max}"
-            performance_plot_symm_MSE({"Gsymm": err_mean[beta_max]["Gsymm"],"dsymm":err_mean[0.95]["dsymm"]}, filename = f"{filename}",lams = [0.0,0.1,1.0,10.0,100.0], save = True)
+            performance_plot_symm_MSE({"Gsymm": err_mean[beta_max]["Gsymm"],"dsymm":err_mean[0.95]["dsymm"]}, filename = f"{filename}_clean_4",lams = lams, save = True, outdir=outdir)
+                                      
 
                 
     return 
